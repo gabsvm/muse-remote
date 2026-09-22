@@ -1,0 +1,20 @@
+{
+  "name": "Muse Remote",
+  "short_name": "MuseRemote",
+  "description": "Control remoto local para Muse Code",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "enctype": "application/x-www-form-urlencoded",
+    "params": { "title": "title", "text": "text", "url": "url" }
+  },
+  "background_color": "#101614",
+  "theme_color": "#101614",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

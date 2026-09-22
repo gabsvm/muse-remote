@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101614">
+<title>Muse Remote</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">Muse Remote</span>
+  <span id="conn" class="pill" data-state="off">off</span>
+  <button id="themeBtn" class="ghost" type="button" aria-label="Cambiar tema">Tema</button>
+  <button id="logoutBtn" class="ghost hidden" type="button">Salir</button>
+</header>
+
+<main>
+  <section id="loginView" class="card">
+    <h1>Acceso local</h1>
+    <p class="muted">Introduce el token que muestra el backend al arrancar. Se guarda solo en este dispositivo.</p>
+    <label>Token
+      <input id="tokenInput" type="password" autocomplete="off" inputmode="text" placeholder="token local">
+    </label>
+    <button id="loginBtn" type="button">Conectar</button>
+    <p id="loginErr" class="err" role="alert"></p>
+  </section>
+
+  <section id="sessionsView" class="hidden">
+    <div class="row">
+      <h1>Sesiones</h1>
+      <button id="hiddenBtn" class="ghost" type="button" title="Ver sesiones ocultas">Ocultas</button>
+      <button id="newBtn" type="button">Nueva</button>
+    </div>
+    <div class="tabs" role="tablist" aria-label="Filtrar sesiones">
+      <button id="tabChats" class="ghost" type="button" role="tab" aria-selected="true">Chats</button>
+      <button id="tabEmpty" class="ghost" type="button" role="tab" aria-selected="false">Vacías</button>
+    </div>
+    <ul id="sessionList" class="sessions"></ul>
+  </section>
+
+  <section id="chatView" class="hidden">
+    <div class="row">
+      <button id="backBtn" class="ghost" type="button">&larr; Sesiones</button>
+      <span id="statusBadge" class="pill" data-state="idle">idle</span>
+      <button id="sysBtn" class="ghost" type="button" title="Mostrar/ocultar mensajes internos">Sistema</button>
+    </div>
+    <div id="wsLine" class="muted" style="font-size:.8rem;margin-top:.3rem"></div>
+    <div id="metaRow" class="meta">
+      <label>Modelo <select id="modelSel"></select></label>
+      <label>Effort
+        <select id="effortSel">
+          <option value="">(sesion)</option>
+          <option>none</option><option>minimal</option><option>low</option>
+          <option>medium</option><option>high</option><option>xhigh</option>
+          <option>max</option><option>ultra</option>
+        </select>
+      </label>
+      <label>Aprobación
+        <select id="approvalSel">
+          <option value="">(sesión)</option>
+          <option value="allowAll">allowAll</option>
+          <option value="promptUnmatched">promptUnmatched</option>
+          <option value="onRequest">onRequest</option>
+          <option value="denyUnmatched">denyUnmatched</option>
+        </select>
+      </label>
+      <label>Si ocupado
+        <select id="busySel">
+          <option value="queue">queue</option>
+          <option value="steer">steer</option>
+          <option value="replace">replace</option>
+        </select>
+      </label>
+      <label>Skill <select id="skillSel"><option value="">(ninguna)</option></select></label>
+      <button id="cancelBtn" class="ghost" type="button" title="Cancelar turno actual">Stop</button>
+      <button id="steerBtn" class="ghost" type="button" title="Dirigir turno en curso">Dirigir</button>
+      <button id="unqueueBtn" class="ghost hidden" type="button" title="Reclamar turno encolado">Desencolar</button>
+      <button id="historyBtn" class="ghost" type="button" title="Cargar historial completo">Historial</button>
+      <button id="forkBtn" class="ghost" type="button" title="Duplicar sesión">Duplicar</button>
+      <button id="compactBtn" class="ghost" type="button" title="Compactar contexto">Compactar</button>
+    </div>
+    <div class="meta">
+      <label style="flex:2">Shell
+        <span style="display:flex;gap:.5rem">
+          <input id="shellInput" placeholder="comando en la carpeta de la sesión" enterkeyhint="go">
+          <button id="shellBtn" type="button" style="width:auto">Run</button>
+        </span>
+      </label>
+    </div>
+    <div class="row" style="margin-top:.5rem">
+      <span class="muted" style="font-size:.8rem">Uso subscripción:</span>
+      <span id="usageLine" class="muted" style="font-size:.8rem">—</span>
+    </div>
+    <div id="approvals"></div>
+    <div id="netinfo" class="netinfo muted"></div>
+    <div id="toast" class="toast hidden" role="status"></div>
+    <ol id="transcript" class="transcript" aria-live="polite"></ol>
+    <div id="imgPreview" class="hidden"></div>
+    <form id="composer" class="composer">
+      <button type="button" id="attachBtn" class="ghost" title="Adjuntar imagen">Img</button>
+      <input type="file" id="fileInput" accept="image/*" class="hidden">
+      <button type="button" id="micBtn" class="ghost" title="Dictar">Mic</button>
+      <textarea id="promptInput" rows="2" placeholder="Escribe un prompt…" enterkeyhint="send"></textarea>
+      <button type="submit" id="sendBtn">Enviar</button>
+    </form>
+  </section>
+</main>
+
+<script src="/app.js" defer></script>
+</body>
+</html>

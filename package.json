@@ -1,0 +1,12 @@
+{
+  "name": "muse-remote",
+  "version": "0.1.0",
+  "description": "Control remoto local (PWA mobile-first) para Muse Code CLI via protocolo MSP oficial (muse serve stdio). Sin API keys PAYG.",
+  "type": "commonjs",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/msp.test.js test/api.test.js test/client.test.js"
+  },
+  "license": "MIT"
+}
