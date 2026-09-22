@@ -43,6 +43,9 @@ Variables opcionales: `MUSE_REMOTE_PORT` (def. 8787),
   (ver `ALLOWED_METHODS` en `server.js`); resto → 403.
 - **Cabeceras**: CSP + `nosniff`, `SAMEORIGIN`, `same-origin`,
   `Permissions-Policy` en API, estáticos y SSE.
+- **Timeouts MSP**: `session/list` 180 s (el primer listado puede tardar
+  ~100 s); resto de métodos 90 s. La UI no lanza listados en paralelo y
+  muestra reintento si expira.
 
 ## Tests
 

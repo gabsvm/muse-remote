@@ -72,6 +72,15 @@ const ALLOWED_METHODS = new Set([
 const RPC_BODY_LIMIT = 5 * 1024 * 1024;
 const MAX_IMAGE_BASE64_CHARS = 4 * 1024 * 1024;
 
+// Timeouts MSP por metodo. `session/list` puede tardar ~105 s en esta
+// maquina (verificado: escanea sesiones en disco al primer listado), asi que
+// tiene presupuesto propio de 180 s. El resto mantiene 90 s; no se sube el
+// global para no enmascarar cuelgues reales de otros metodos.
+const DEFAULT_MSP_TIMEOUT = 90000;
+const SESSION_LIST_TIMEOUT = 180000;
+const METHOD_TIMEOUTS = { 'session/list': SESSION_LIST_TIMEOUT };
+function timeoutForMethod(method) { return METHOD_TIMEOUTS[method] || DEFAULT_MSP_TIMEOUT; }
+
 function loadOrCreateToken() {
   if (process.env.MUSE_REMOTE_TOKEN && process.env.MUSE_REMOTE_TOKEN.length >= 16) {
     return process.env.MUSE_REMOTE_TOKEN;
@@ -220,7 +229,7 @@ class MspHost {
     }
   }
 
-  rawRequest(method, params, timeoutMs = 90000) {
+  rawRequest(method, params, timeoutMs = timeoutForMethod(method)) {
     return new Promise((resolve, reject) => {
       if (!this.child) return reject(new Error('msp host not running'));
       const id = this.nextId++;
@@ -488,6 +497,7 @@ if (require.main === module) {
 module.exports = {
   server, msp, uuidv7, HOST, loadOrCreateToken,
   ALLOWED_METHODS, RPC_BODY_LIMIT, MAX_IMAGE_BASE64_CHARS, CSP,
+  DEFAULT_MSP_TIMEOUT, SESSION_LIST_TIMEOUT, METHOD_TIMEOUTS, timeoutForMethod,
   META_ENV_KEY, assertNoMetaApiKey, childEnvWithoutMetaKey,
   authorized, setSecurityHeaders, imagePartTooLarge,
 };

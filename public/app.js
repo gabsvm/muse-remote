@@ -147,7 +147,17 @@ function sessMeta(s) {
   }
   return parts.join(' · ');
 }
+// Sin session/list paralelas: si hay un listado en vuelo (puede tardar
+// ~100 s la primera vez), las llamadas automaticas reutilizan esa promesa
+// en vez de lanzar otra. El estado de carga se mantiene y, si expira,
+// loadSessionsInner ya muestra error con boton de reintento.
+let sessionsLoading = null;
 async function loadSessions() {
+  if (sessionsLoading) return sessionsLoading;
+  sessionsLoading = loadSessionsInner().finally(() => { sessionsLoading = null; });
+  return sessionsLoading;
+}
+async function loadSessionsInner() {
   const ul = $('sessionList');
   ul.innerHTML = '<li class="loading">Cargando sesiones… (la primera vez tarda)</li>';
   let res;
