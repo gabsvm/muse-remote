@@ -78,7 +78,10 @@ test('events abre SSE y emite subscribed (ruta que usa la PWA)', async () => {
   const ctrl = new AbortController();
   const kill = setTimeout(() => ctrl.abort(), 30000);
   try {
-    const r = await fetch(`${base}/api/events?sessionId=${sid}&token=${token}`, { signal: ctrl.signal });
+    const r = await fetch(`${base}/api/events?sessionId=${sid}`, {
+      signal: ctrl.signal,
+      headers: { authorization: 'Bearer ' + token, accept: 'text/event-stream' },
+    });
     assert.equal(r.status, 200);
     assert.match(r.headers.get('content-type') || '', /text\/event-stream/);
     let buf = '';

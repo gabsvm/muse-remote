@@ -1,5 +1,5 @@
 // Service worker: app-shell offline para la PWA. Nunca cachea /api/*.
-const CACHE = 'muse-remote-v16';
+const CACHE = 'muse-remote-v17';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon.svg'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));

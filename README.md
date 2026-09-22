@@ -22,6 +22,28 @@ Variables opcionales: `MUSE_REMOTE_PORT` (def. 8787),
 `MUSE_REMOTE_TOKEN` (token propio ≥16 caracteres), `MUSE_BIN`
 (ruta al `muse-*.exe` si la autodeteccion falla).
 
+## Seguridad
+
+- **Fail-closed contra `META_API_KEY`**: si esa variable está definida
+  (no vacía), el backend se niega a arrancar con error. El hijo
+  `muse serve` se lanza además con entorno saneado (sin heredar
+  `META_API_KEY`). Este backend no usa ninguna Model API.
+- **Verificación separada**: una API key almacenada *dentro* de la
+  configuración interna de Muse (ficheros del CLI / login persistido)
+  no la detecta ni la elimina este saneado de entorno. Verifícalo por
+  separado (config/auth del CLI; `model/list` debe responder provider
+  `meta` por subscription).
+- **Auth del streaming**: `GET /api/events` exige
+  `Authorization: Bearer <token>`; un `?token=` en query se ignora
+  (nunca viaja el token en URL/logs).
+- **Límites**: cuerpo `/api/rpc` máx 5 MiB; parte `image` máx 4 MiB en
+  base64. El cliente genera JPEG (lado mayor 1568 px, q0.85) y rechaza
+ Adjuntos mayores antes de enviar. Cuerpos mayores responden 413.
+- **RPC**: allowlist estricta de métodos MSP usados por la PWA
+  (ver `ALLOWED_METHODS` en `server.js`); resto → 403.
+- **Cabeceras**: CSP + `nosniff`, `SAMEORIGIN`, `same-origin`,
+  `Permissions-Policy` en API, estáticos y SSE.
+
 ## Tests
 
 ```powershell

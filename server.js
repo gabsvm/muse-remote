@@ -17,8 +17,60 @@ const PORT = Number(process.env.MUSE_REMOTE_PORT || 8787);
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const TOKEN_FILE = path.join(__dirname, '.token');
 
-// Metodos gestionados internamente por el puente; no se exponen en /api/rpc.
-const DENIED_METHODS = new Set(['initialize', 'initialized']);
+// Fail-closed contra META_API_KEY (clave de Model API de pago).
+// El backend NUNCA usa Model API: toda inferencia la ejecuta `muse serve`
+// con el login/subscription local. Si META_API_KEY esta definida en el
+// entorno, el backend se niega a arrancar (fail-closed) para no mezclar
+// facturacion PAYG con el puente local.
+// NOTA: esto solo sanea el entorno del proceso e hijo. Una API key
+// almacenada DENTRO de la configuracion interna de Muse (ficheros del CLI,
+// login persistido) NO se detecta ni se elimina aqui: requiere verificacion
+// separada por el usuario (p. ej. revisar la configuracion/auth del CLI y
+// que `model/list` responda provider `meta` por subscription).
+const META_ENV_KEY = 'META_API_KEY';
+function assertNoMetaApiKey(env = process.env) {
+  const v = env[META_ENV_KEY];
+  if (v !== undefined && String(v).trim() !== '') {
+    throw new Error(
+      'fail-closed: ' + META_ENV_KEY + ' esta definida; el backend se niega a arrancar ' +
+      '(desactivala con `$env:' + META_ENV_KEY + '=$null` y reintenta)'
+    );
+  }
+}
+// Entorno saneado para el hijo `muse serve`: nunca hereda META_API_KEY
+// aunque el padre la tuviera (defensa en profundidad junto al fail-closed).
+function childEnvWithoutMetaKey(env = process.env) {
+  const next = { ...env };
+  delete next[META_ENV_KEY];
+  return next;
+}
+
+// Allowlist de metodos MSP realmente usados por esta app (PWA + puente
+// interno). Todo lo demas por /api/rpc se rechaza con 403. `initialize` e
+// `initialized` los gestiona el puente y no se exponen. `view/subscribe` se
+// usa internamente en /api/events (SSE) y tambien se permite por /api/rpc
+// para sondas.
+const ALLOWED_METHODS = new Set([
+  'session/list', 'session/start', 'session/resume', 'session/read',
+  'session/fork', 'session/compact', 'session/setModel',
+  'session/setReasoningEffort', 'session/setApprovalMode', 'session/userShell',
+  'turn/start', 'turn/steer', 'turn/unqueue', 'turn/interrupt',
+  'view/page', 'view/subscribe',
+  'model/list', 'skill/list', 'usage/read',
+  'item/readOutput',
+  'task/background', 'task/stop',
+  'subagent/sendMessage', 'subagent/followupTask', 'subagent/stop',
+  'approval/decide', 'approval/listPending',
+  'userInput/answer',
+]);
+
+// Limites explicitos de cuerpo/imagen (punto 3).
+// El cliente genera JPEG (max 1568 px lado mayor, q0.85) en base64: en la
+// practica <1 MiB, pero 256 KiB lo rechazaba. 5 MiB de cuerpo RPC deja
+// margen al base64+JSON sin abrir la puerta a DoS por cuerpos gigantes.
+// La parte `image` individual se acota a 4 MiB de base64 (~3 MiB binarios).
+const RPC_BODY_LIMIT = 5 * 1024 * 1024;
+const MAX_IMAGE_BASE64_CHARS = 4 * 1024 * 1024;
 
 function loadOrCreateToken() {
   if (process.env.MUSE_REMOTE_TOKEN && process.env.MUSE_REMOTE_TOKEN.length >= 16) {
@@ -86,7 +138,7 @@ class MspHost {
     if (this.starting || this.child) return;
     this.starting = true;
     const { file, shell } = resolveMuseBin();
-    const child = spawn(file, ['serve'], { stdio: ['pipe', 'pipe', 'pipe'], shell });
+    const child = spawn(file, ['serve'], { stdio: ['pipe', 'pipe', 'pipe'], shell, env: childEnvWithoutMetaKey() });
     this.child = child;
     child.stdout.on('data', (d) => this.onData(d.toString()));
     child.stderr.on('data', (d) => { this.lastStderr = d.toString().slice(0, 500); });
@@ -193,7 +245,7 @@ class MspHost {
 
   request(method, params) {
     if (!this.ready) return Promise.reject(Object.assign(new Error('msp host not ready'), { code: 503 }));
-    if (DENIED_METHODS.has(method)) return Promise.reject(Object.assign(new Error('method managed by bridge'), { code: 403 }));
+    if (!ALLOWED_METHODS.has(method)) return Promise.reject(Object.assign(new Error('method not allowed'), { code: 403 }));
     return this.rawRequest(method, params || {});
   }
 }
@@ -210,47 +262,131 @@ const MIME = {
   '.png': 'image/png',
 };
 
+// CSP compatible con la PWA (mismo origen, sin scripts externos; imagenes
+// en data:/blob: para preview/adjuntos; estilos inline via 'unsafe-inline'
+// porque index.html usa atributos style y app.js fija cssText).
+const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob:",
+  "connect-src 'self'",
+  "font-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'self'",
+  'worker-src \'self\'',
+  "manifest-src 'self'",
+].join('; ');
+function setSecurityHeaders(res) {
+  res.setHeader('content-security-policy', CSP);
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('x-frame-options', 'SAMEORIGIN');
+  res.setHeader('referrer-policy', 'same-origin');
+  res.setHeader('permissions-policy', 'camera=(), geolocation=(), microphone=(self)');
+  res.setHeader('cross-origin-opener-policy', 'same-origin');
+  res.setHeader('cross-origin-resource-policy', 'same-origin');
+}
+
 function sendJson(res, code, obj) {
   const body = JSON.stringify(obj);
+  setSecurityHeaders(res);
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   res.end(body);
 }
 
-function authorized(req, tokenFromQuery) {
+// Solo Authorization: Bearer. El streaming usa fetch (no EventSource), que
+// si permite cabeceras, asi que el token NUNCA viaja en query string
+// (evita que quede en logs/historial). Un ?token= presente se ignora.
+function authorized(req) {
   const h = req.headers.authorization || '';
   if (h.startsWith('Bearer ') && timingSafeEqual(h.slice(7), AUTH_TOKEN)) return true;
-  if (tokenFromQuery && timingSafeEqual(tokenFromQuery, AUTH_TOKEN)) return true;
   return false;
 }
 
-function readBody(req, limit = 256 * 1024) {
+function isBodyTooLarge(e) { return !!e && e.message === 'body too large'; }
+
+function readBody(req, limit = RPC_BODY_LIMIT) {
   return new Promise((resolve, reject) => {
     let n = 0;
+    let tooLarge = false;
     const parts = [];
     req.on('data', (d) => {
       n += d.length;
-      if (n > limit) { reject(new Error('body too large')); req.destroy(); return; }
+      if (tooLarge) return; // drenar el resto sin guardar (respuesta 413 al final)
+      if (n > limit) {
+        tooLarge = true;
+        parts.length = 0; // liberar lo acumulado
+        return;
+      }
       parts.push(d);
     });
-    req.on('end', () => resolve(Buffer.concat(parts).toString('utf8')));
+    req.on('end', () => {
+      if (tooLarge) reject(new Error('body too large'));
+      else resolve(Buffer.concat(parts).toString('utf8'));
+    });
     req.on('error', reject);
   });
 }
 
 function serveStatic(req, res, pathname) {
-  let rel = decodeURIComponent(pathname);
+  let rel;
+  try {
+    rel = decodeURIComponent(pathname);
+  } catch {
+    return sendJson(res, 400, { ok: false, error: 'bad path' });
+  }
+  if (rel.includes('\0')) return sendJson(res, 400, { ok: false, error: 'bad path' });
   if (rel === '/') rel = '/index.html';
-  const file = path.normalize(path.join(PUBLIC_DIR, rel));
-  if (!file.startsWith(PUBLIC_DIR)) { res.writeHead(403); res.end(); return; }
-  fs.readFile(file, (err, data) => {
-    if (err) { res.writeHead(404); res.end('not found'); return; }
-    res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
-    res.end(data);
+  // Normalizar contra PUBLIC_DIR y exigir containment estricto (con
+  // separador): bloquea /..%2fserver.js, /%2e%2e/, backslashes y prefijos
+  // hermanos tipo /public-evil.
+  const relSlashed = rel.startsWith('/') ? rel : '/' + rel;
+  const file = path.normalize(path.join(PUBLIC_DIR, '.' + relSlashed));
+  if (file !== PUBLIC_DIR && !file.startsWith(PUBLIC_DIR + path.sep)) {
+    return sendJson(res, 403, { ok: false, error: 'forbidden' });
+  }
+  fs.stat(file, (statErr, st) => {
+    if (statErr || !st.isFile()) {
+      setSecurityHeaders(res);
+      res.writeHead(404);
+      res.end('not found');
+      return;
+    }
+    fs.readFile(file, (err, data) => {
+      if (err) {
+        setSecurityHeaders(res);
+        res.writeHead(404);
+        res.end('not found');
+        return;
+      }
+      setSecurityHeaders(res);
+      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
+      res.end(data);
+    });
   });
 }
 
+// Rechaza partes `image` gigantes antes de tocar MSP (413 explicito).
+function imagePartTooLarge(params) {
+  const input = params && params.input;
+  if (!Array.isArray(input)) return false;
+  for (const p of input) {
+    if (p && p.type === 'image' && typeof p.base64Data === 'string') {
+      if (p.base64Data.length > MAX_IMAGE_BASE64_CHARS) return true;
+    }
+  }
+  return false;
+}
+
 const server = http.createServer(async (req, res) => {
-  const u = new URL(req.url, 'http://x');
+  let u;
+  try {
+    u = new URL(req.url, 'http://x');
+  } catch {
+    return sendJson(res, 400, { ok: false, error: 'bad request' });
+  }
   const pathname = u.pathname;
 
   if (req.method === 'GET' && pathname === '/api/health') {
@@ -263,14 +399,19 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'POST' && pathname === '/api/rpc') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
     let body;
-    try { body = JSON.parse(await readBody(req)); }
-    catch { return sendJson(res, 400, { ok: false, error: 'bad json' }); }
+    try { body = JSON.parse(await readBody(req, RPC_BODY_LIMIT)); }
+    catch (e) {
+      if (isBodyTooLarge(e)) return sendJson(res, 413, { ok: false, error: 'body too large' });
+      return sendJson(res, 400, { ok: false, error: 'bad json' });
+    }
     if (!body || typeof body.method !== 'string') return sendJson(res, 400, { ok: false, error: 'method required' });
-    if (DENIED_METHODS.has(body.method)) return sendJson(res, 403, { ok: false, error: 'method managed by bridge' });
+    if (!ALLOWED_METHODS.has(body.method)) return sendJson(res, 403, { ok: false, error: 'method not allowed' });
+    if (imagePartTooLarge(body.params)) return sendJson(res, 413, { ok: false, error: 'image too large' });
     try {
       const result = await msp.request(body.method, body.params || {});
       return sendJson(res, 200, { ok: true, result });
     } catch (e) {
+      if (e && e.code === 403) return sendJson(res, 403, { ok: false, error: String(e.message || e), mspCode: e.code });
       const code = e.code === 503 ? 503 : 502;
       return sendJson(res, code, { ok: false, error: String((e && e.message) || e), mspCode: e.code });
     }
@@ -278,8 +419,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && pathname === '/api/events') {
     const sessionId = u.searchParams.get('sessionId');
     if (!sessionId) { console.error('[events] 400 sin sessionId'); return sendJson(res, 400, { ok: false, error: 'sessionId required' }); }
-    if (!authorized(req, u.searchParams.get('token'))) { console.error('[events] 401 token invalido'); return sendJson(res, 401, { ok: false, error: 'unauthorized' }); }
+    if (!authorized(req)) { console.error('[events] 401 token invalido'); return sendJson(res, 401, { ok: false, error: 'unauthorized' }); }
     if (!msp.ready) { console.error('[events] 503 msp no listo'); return sendJson(res, 503, { ok: false, error: 'msp host not ready' }); }
+    setSecurityHeaders(res);
     res.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-store',
@@ -317,11 +459,24 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.method === 'GET') return serveStatic(req, res, pathname);
+  setSecurityHeaders(res);
   res.writeHead(405);
   res.end();
 });
 
+// Evita que un decodeURIComponent invalido u otro error de ruta tumbe el
+// servidor: cualquier excepcion no capturada en el handler responde 500.
+server.on('clientError', (err, socket) => {
+  try { socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'); } catch { /* noop */ }
+});
+
 if (require.main === module) {
+  try {
+    assertNoMetaApiKey();
+  } catch (e) {
+    console.error(String((e && e.message) || e));
+    process.exit(1);
+  }
   msp.start();
   server.listen(PORT, HOST, () => {
     console.log(`muse-remote en http://${HOST}:${PORT}`);
@@ -330,4 +485,9 @@ if (require.main === module) {
   });
 }
 
-module.exports = { server, msp, uuidv7, HOST, loadOrCreateToken };
+module.exports = {
+  server, msp, uuidv7, HOST, loadOrCreateToken,
+  ALLOWED_METHODS, RPC_BODY_LIMIT, MAX_IMAGE_BASE64_CHARS, CSP,
+  META_ENV_KEY, assertNoMetaApiKey, childEnvWithoutMetaKey,
+  authorized, setSecurityHeaders, imagePartTooLarge,
+};

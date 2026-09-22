@@ -1,5 +1,11 @@
 'use strict';
 // Cliente PWA: habla solo con este backend (mismo origen). Sin API keys.
+const CLIENT_MAX_IMAGE_DIM = 1568; // lado mayor max del JPEG generado
+const CLIENT_MAX_IMAGE_BASE64_CHARS = 4 * 1024 * 1024; // ~3 MiB binarios
+const CLIENT_MAX_RPC_BYTES = 5 * 1024 * 1024; // espejo del limite del servidor
+function imageBase64TooLarge(b64) {
+  return typeof b64 === 'string' && b64.length > CLIENT_MAX_IMAGE_BASE64_CHARS;
+}
 const $ = (id) => document.getElementById(id);
 const state = {
   token: localStorage.getItem('muse-remote-token') || '',
@@ -726,13 +732,18 @@ function parseFrame(frame) {
   if (type === null) return null;
   return { type, data: data.join('\n') };
 }
-function streamEvents(url, myGen, handlers) {
+function streamEvents(url, myGen, handlers, extraHeaders) {
   const ctrl = new AbortController();
   const handle = { closed: false, close() { handle.closed = true; try { ctrl.abort(); } catch {} } };
   (async () => {
     let r;
     try {
-      r = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'text/event-stream' } });
+      // El token viaja en Authorization: Bearer (fetch si permite
+      // cabeceras); nunca en el query string.
+      r = await fetch(url, {
+        signal: ctrl.signal,
+        headers: Object.assign({ Accept: 'text/event-stream' }, extraHeaders || {}),
+      });
     } catch (e) {
       if (!handle.closed) handlers.failure('red: ' + (e.name || 'error'));
       return;
@@ -774,9 +785,10 @@ function connectEvents() {
   if (state.es) { try { state.es.close(); } catch {} state.es = null; }
   clearTimeout(state.esRetry);
   state.esRetry = null;
-  const q = new URLSearchParams({ sessionId: state.sessionId, token: state.token });
+  const q = new URLSearchParams({ sessionId: state.sessionId });
   if (state.viewCursor) q.set('after', state.viewCursor);
   const url = '/api/events?' + q.toString();
+  const authHeader = { authorization: 'Bearer ' + state.token };
   const forward = (type, raw) => {
     if (myGen !== esGen) return;
     noteAlive();
@@ -815,7 +827,7 @@ function connectEvents() {
     open: () => { if (myGen === esGen) { setConn(true); state.esFails = 0; } },
     event: forward,
     failure,
-  });
+  }, authHeader);
 }
 // Watchdog: si el proxy intermedio mata el stream en silencio, re-suscribe
 // gapless con after=cursor (el servidor reemite lo perdido).
@@ -843,6 +855,7 @@ async function sendPrompt(text) {
   else if (text) parts.push({ type: 'text', text });
   if (state.pendingImage) {
     const im = state.pendingImage;
+    if (imageBase64TooLarge(im.base64Data)) throw new Error('imagen demasiado grande (máx 4 MiB en base64)');
     parts.push({ type: 'image', base64Data: im.base64Data, mediaType: im.mediaType, width: im.width, height: im.height });
   }
   if (!parts.length) return;
@@ -874,14 +887,15 @@ function attachImage(file) {
   const url = URL.createObjectURL(file);
   img.onload = () => {
     URL.revokeObjectURL(url);
-    const MAX = 1568;
-    const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+    const scale = Math.min(1, CLIENT_MAX_IMAGE_DIM / Math.max(img.width, img.height));
     const w = Math.max(1, Math.round(img.width * scale));
     const h = Math.max(1, Math.round(img.height * scale));
     const cv = document.createElement('canvas');
     cv.width = w; cv.height = h;
     cv.getContext('2d').drawImage(img, 0, 0, w, h);
     const dataUrl = cv.toDataURL('image/jpeg', 0.85);
+    const b64 = dataUrl.split(',')[1] || '';
+    if (imageBase64TooLarge(b64)) { toast('Imagen demasiado grande tras comprimir (máx 4 MiB)'); return; }
     state.pendingImage = {
       base64Data: dataUrl.split(',')[1],
       mediaType: 'image/jpeg', width: w, height: h,
@@ -1159,5 +1173,5 @@ async function boot() {
 
 // Exportacion solo para tests node (en navegador `module` no existe).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden };
+  module.exports = { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents };
 }

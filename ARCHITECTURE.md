@@ -48,10 +48,10 @@ Telefono (PWA) --HTTPS--> Tailscale Serve --HTTP--> 127.0.0.1:8787
 
 - El backend es el **unico cliente** del host MSP: multiplexa a N
   pestañas via SSE (`GET /api/events?sessionId=`).
-- `POST /api/rpc` = proxy de metodos MSP con denylist
+- `POST /api/rpc` = proxy de metodos MSP con allowlist (ALLOWED_METHODS; resto -> 403)
   (`initialize`, `initialized` los gestiona el puente).
 - Auth: Bearer token local fuerte (generado en `.token`, o
-  `MUSE_REMOTE_TOKEN`). SSE lo pasa por `?token=` (EventSource no
+  `MUSE_REMOTE_TOKEN`). SSE usa `Authorization: Bearer` por fetch (el `?token=` se ignora). (Streaming migrado de EventSource,
   admite cabeceras).
 - Persistencia con navegador cerrado: el hijo `muse serve` y las
   sesiones viven en el PC; al reabrir, la PWA hace `session/resume` +
@@ -84,3 +84,10 @@ Telefono (PWA) --HTTPS--> Tailscale Serve --HTTP--> 127.0.0.1:8787
 3. Siguiente (no incluido): multi-host, adjuntar imagenes (`image` parts),
    skills (`skill/list`), goals, compact, fork/rename en UI, notificaciones
    push, modo offline con cola de prompts.
+
+## 4. Endurecimiento (2026-09-22)
+
+- Fail-closed `META_API_KEY`: el backend no arranca si esta definida; el hijo `muse serve` se lanza con env saneado (sin heredarla). Sin Model API. Una key guardada dentro de la config interna de Muse no la cubre este saneado: requiere verificacion separada (auth del CLI, `model/list` con provider `meta`).
+- Limites: `/api/rpc` 5 MiB; parte `image` 4 MiB base64; cliente JPEG 1568 px q0.85 con chequeo previo (413 si excede).
+- Estaticos con containment estricto + `decodeURIComponent` invalido -> 400 sin tumbar el servidor.
+- CSP y headers (`nosniff`, `SAMEORIGIN`, `same-origin`, `Permissions-Policy`) en API, estaticos y SSE.

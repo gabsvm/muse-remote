@@ -10,7 +10,7 @@ global.localStorage = {
   setItem(k, v) { this._s[k] = String(v); },
   removeItem(k) { delete this._s[k]; },
 };
-const { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden } = require('../public/app.js');
+const { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents } = require('../public/app.js');
 
 test('parseFrame: evento subscribed simple', () => {
   assert.deepEqual(parseFrame('event: subscribed\ndata: {"a":1}'), { type: 'subscribed', data: '{"a":1}' });
@@ -83,6 +83,39 @@ test('usageLine: usado, restante y reseteo', () => {
   assert.match(t, /se libera/);
   const over = usageLine({ usedPercent: 112 }, 'Ventana');
   assert.match(over, /queda -12%/);
+});
+
+test('limites de imagen del cliente explicitos y coherentes con el servidor', () => {
+  assert.equal(CLIENT_MAX_IMAGE_DIM, 1568);
+  assert.equal(CLIENT_MAX_IMAGE_BASE64_CHARS, 4 * 1024 * 1024);
+  assert.equal(CLIENT_MAX_RPC_BYTES, 5 * 1024 * 1024);
+  assert.equal(imageBase64TooLarge('a'.repeat(100)), false);
+  assert.equal(imageBase64TooLarge('a'.repeat(CLIENT_MAX_IMAGE_BASE64_CHARS + 1)), true);
+  assert.equal(imageBase64TooLarge(null), false);
+});
+
+test('streaming usa Bearer en cabecera, nunca token en query', async () => {
+  const seen = {};
+  global.fetch = async (url, opts) => {
+    seen.url = String(url);
+    seen.headers = opts && opts.headers;
+    return { ok: false, status: 401, headers: { get: () => '' }, body: { cancel: async () => {} } };
+  };
+  let failed = null;
+  const h = streamEvents('/api/events?sessionId=s', 1, { open: () => {}, event: () => {}, failure: (r) => { failed = r; } }, { authorization: 'Bearer tok' });
+  await new Promise((r) => setTimeout(r, 50));
+  h.close();
+  assert.ok(!seen.url.includes('token='), 'token en query: ' + seen.url);
+  assert.equal(seen.headers && seen.headers.authorization, 'Bearer tok');
+  delete global.fetch;
+  assert.ok(failed === null || typeof failed === 'string');
+});
+
+test('connectEvents no mete el token en la URL (fuente)', () => {
+  const fs = require('node:fs');
+  const src = fs.readFileSync(require.resolve('../public/app.js'), 'utf8');
+  assert.ok(!/URLSearchParams\(\{\s*sessionId:[^}]*token/.test(src), 'query con token');
+  assert.ok(/authorization:\s*'Bearer '\s*\+\s*state\.token/.test(src), 'falta Bearer en streaming');
 });
 
 test('ocultas: guardar, leer y comprobar', () => {
