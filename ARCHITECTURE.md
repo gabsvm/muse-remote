@@ -131,3 +131,25 @@ UI/UX:
 - Accesibilidad: objetivos >= 44 px, foco visible, patron ARIA de
   pestañas con flechas, live region para respuestas/aprobaciones, contraste
   AA, safe areas, `prefers-reduced-motion` y `forced-colors`.
+
+## 6. Paridad con remotos de referencia (Claude Code / Codex) (2026-10-02)
+
+- Herramientas legibles: `args` JSON -> resumen en una linea (`$ comando`,
+  ruta, patron) y diff coloreado con `+N −M` para ediciones/escrituras;
+  salidas con formato diff tambien se colorean. Estados traducidos y
+  acciones de tarea solo mientras la herramienta sigue viva.
+- Indicador "trabajando" con cronometro y ultima actividad (Pensando,
+  Usando <tool>, Escribiendo); al terminar, aviso "Trabajó N s"; turnos
+  fallidos/detenidos como aviso en la conversacion.
+- Notificaciones del sistema (aprobaciones, preguntas, turno terminado o
+  fallido) y badge de la app con pendientes. Solo mientras la PWA sigue
+  viva en segundo plano: push real con la app cerrada requeriria Web Push
+  (VAPID) en el backend.
+- Banner persistente de reconexion/sin red en vez de toasts.
+- Composer: menu `/` (skills + /compactar, /duplicar, /historial,
+  /detener, /shell <cmd>) con teclado y ARIA; chip de modelo/esfuerzo
+  siempre visible; chip de mensaje en cola con Desencolar.
+- Chat vacio con sugerencias; mensajes largos del usuario plegados;
+  listas markdown; teclado de iOS via `visualViewport`.
+- Lista: pull-to-refresh y refresco silencioso cada 30 s si el listado
+  es rapido; el historial del navegador no apila entradas de chat.

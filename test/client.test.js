@@ -10,7 +10,7 @@ global.localStorage = {
   setItem(k, v) { this._s[k] = String(v); },
   removeItem(k) { delete this._s[k]; },
 };
-const { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName } = require('../public/app.js');
+const { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash } = require('../public/app.js');
 
 test('parseFrame: evento subscribed simple', () => {
   assert.deepEqual(parseFrame('event: subscribed\ndata: {"a":1}'), { type: 'subscribed', data: '{"a":1}' });
@@ -177,4 +177,51 @@ test('friendlyError y wsName', () => {
   assert.equal(wsName('C:\\Dev\\proyecto'), 'proyecto');
   assert.equal(wsName('/home/u/repo/'), 'repo');
   assert.equal(wsName(''), '');
+});
+
+test('toolView: resumen legible y diff desde args JSON', () => {
+  const sh = toolView({ toolName: 'shell', args: '{"command":"npm test -- --ci"}' });
+  assert.equal(sh.summary, '$ npm test -- --ci');
+  assert.equal(sh.diff, null);
+  const ed = toolView({ toolName: 'edit', args: JSON.stringify({ file_path: 'src/a.js', old_string: 'a\nb', new_string: 'c' }) });
+  assert.equal(ed.summary, 'src/a.js');
+  assert.equal(ed.diff, '-a\n-b\n+c');
+  assert.equal(ed.add, 1);
+  assert.equal(ed.del, 2);
+  const wr = toolView({ toolName: 'write', args: { path: 'n.txt', content: 'x\ny' } });
+  assert.equal(wr.add, 2);
+  const raw = toolView({ toolName: 't', args: 'no es json' });
+  assert.equal(raw.parsed, false);
+  assert.equal(raw.summary, '');
+  assert.equal(parseArgs('[1]').length, 1);
+  assert.equal(parseArgs('3'), null);
+});
+
+test('diffStats y looksLikeDiff ignoran cabeceras', () => {
+  const d = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n+more';
+  assert.deepEqual(diffStats(d), { add: 2, del: 1 });
+  assert.equal(looksLikeDiff(d), true);
+  assert.equal(looksLikeDiff('hola\nmundo'), false);
+  assert.equal(looksLikeDiff('- item de lista'), false);
+});
+
+test('fmtElapsed', () => {
+  assert.equal(fmtElapsed(0), '0 s');
+  assert.equal(fmtElapsed(42000), '42 s');
+  assert.equal(fmtElapsed(65000), '1 min 05 s');
+  assert.equal(fmtElapsed(3725000), '1 h 02 min');
+});
+
+test('comandos /: sugerencias y parseo', () => {
+  const skills = [{ id: 'review', label: 'Code review' }];
+  assert.deepEqual(slashMatches('hola', skills), []);
+  assert.deepEqual(slashMatches('/compactar ya', skills), []);
+  const all = slashMatches('/', skills).map((o) => o.label);
+  assert.ok(all.includes('/compactar') && all.includes('/review'));
+  assert.deepEqual(slashMatches('/rev', skills).map((o) => o.id), ['review']);
+  assert.deepEqual(slashMatches('/code', skills).map((o) => o.id), ['review']);
+  assert.deepEqual(parseSlash('/shell ls -la'), { cmd: 'shell', arg: 'ls -la' });
+  assert.deepEqual(parseSlash('/Compactar'), { cmd: 'compactar', arg: '' });
+  assert.equal(parseSlash('/review algo'), null); // skill: se envia como texto/skill
+  assert.equal(parseSlash('texto normal'), null);
 });

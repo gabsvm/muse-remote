@@ -2,7 +2,7 @@
 // Red primero (con revalidacion no-cache del servidor) y cache como respaldo
 // offline: antes era cache-first y la PWA podia quedarse con un app.js viejo
 // hasta que se cambiaba la version del SW.
-const CACHE = 'muse-remote-v18';
+const CACHE = 'muse-remote-v19';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/theme.js', '/manifest.webmanifest', '/icon.svg'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -32,5 +32,16 @@ self.addEventListener('fetch', (e) => {
         return res;
       })
       .catch(() => caches.match(key).then((hit) => hit || (isNav ? caches.match('/index.html') : Response.error())))
+  );
+});
+
+// Tocar una notificacion enfoca la PWA abierta (o la abre).
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
+      for (const c of cs) if ('focus' in c) return c.focus();
+      return self.clients.openWindow('/');
+    })
   );
 });

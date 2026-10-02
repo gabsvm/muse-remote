@@ -67,6 +67,10 @@
   </button>
 </header>
 
+<div id="netBanner" class="net-banner hidden" role="status" aria-live="polite">
+  <span class="spinner" aria-hidden="true"></span><span id="netBannerTxt">Reconectando…</span>
+</div>
+
 <main id="main">
   <!-- ===== Login ===== -->
   <section id="loginView" class="view" aria-labelledby="loginTitle">
@@ -90,6 +94,7 @@
 
   <!-- ===== Sesiones ===== -->
   <section id="sessionsView" class="view hidden" aria-labelledby="sessionsTitle">
+    <div id="ptr" class="ptr" aria-hidden="true"><svg class="ic"><use href="#i-refresh"/></svg></div>
     <div class="view-head">
       <h1 id="sessionsTitle" tabindex="-1" data-view-focus>Sesiones</h1>
       <button id="refreshBtn" class="icon-btn" type="button" aria-label="Actualizar lista de sesiones">
@@ -128,7 +133,23 @@
   <section id="chatView" class="view hidden" aria-labelledby="chatTitle">
     <h1 id="chatTitle" class="sr-only" tabindex="-1" data-view-focus>Chat</h1>
     <div id="wsLine" class="ws-line muted"></div>
+    <div id="chatEmpty" class="chat-empty hidden">
+      <img src="/icon.svg" alt="" width="48" height="48">
+      <h2>¿En qué trabajamos?</h2>
+      <p class="muted">Escribe un mensaje o elige una idea. Usa <kbd>/</kbd> para skills y comandos.</p>
+      <div class="suggests">
+        <button type="button" class="suggest" data-suggest="Explícame la estructura de este proyecto y sus piezas principales.">Explicar el proyecto</button>
+        <button type="button" class="suggest" data-suggest="Revisa el código en busca de bugs y propón arreglos concretos.">Buscar bugs</button>
+        <button type="button" class="suggest" data-suggest="Ejecuta los tests y resume los fallos con su causa probable.">Ejecutar los tests</button>
+        <button type="button" class="suggest" data-suggest="Escribe tests para las partes del código que no están cubiertas.">Escribir tests</button>
+      </div>
+    </div>
     <ol id="transcript" class="transcript" aria-label="Conversación"></ol>
+    <div id="working" class="working hidden" role="status" aria-live="off">
+      <span class="work-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span id="workingTxt">Trabajando…</span>
+      <span id="workingTime" class="work-time"></span>
+    </div>
     <div id="approvals" class="approvals" role="region" aria-label="Solicitudes pendientes"></div>
 
     <button id="jumpBtn" class="jump-btn" type="button" aria-label="Ir al final de la conversación" hidden>
@@ -137,6 +158,7 @@
     </button>
 
     <form id="composer" class="composer" aria-label="Enviar mensaje">
+      <ul id="slashMenu" class="slash-menu hidden" role="listbox" aria-label="Skills y comandos"></ul>
       <div id="chips" class="chips hidden"></div>
       <div id="imgPreview" class="img-preview hidden"></div>
       <div class="composer-row">
@@ -210,6 +232,7 @@
       <button id="forkBtn" class="btn btn-ghost" type="button">Duplicar sesión</button>
       <button id="compactBtn" class="btn btn-ghost" type="button">Compactar</button>
       <button id="sysBtn" class="btn btn-ghost" type="button" aria-pressed="false">Mensajes de sistema</button>
+      <button id="notifyBtn" class="btn btn-ghost" type="button" aria-pressed="false">Notificaciones</button>
     </div>
 
     <h3 class="sheet-sub">Shell</h3>

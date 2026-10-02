@@ -29,6 +29,10 @@ const state = {
   openSeq: 0,
   unread: 0,
   rec: null,
+  turnStartedAt: 0,
+  activity: '',
+  expanded: new Set(), // mensajes largos desplegados
+  notify: false,
 };
 function loadHidden() {
   try { return JSON.parse(localStorage.getItem('muse-remote-hidden') || '[]'); }
@@ -132,6 +136,8 @@ function setStatus(s) {
   b.textContent = STATUS_LABEL[s] || s;
   b.setAttribute('aria-label', 'Estado de la sesión: ' + (STATUS_LABEL[s] || s));
   $('cancelBtn').classList.toggle('hidden', !(s === 'running' || state.running));
+  updateWorking();
+  updateBadge();
   if (document.body.dataset.view === 'chatView') {
     document.title = (s === 'waiting' ? '● ' : s === 'running' ? '… ' : '') + 'Muse Remote';
   }
@@ -340,9 +346,9 @@ function filterSessions(list, opts) {
 // en vez de lanzar otra. Pestañas, busqueda y ocultar re-renderizan desde
 // la cache local sin volver a la red.
 let sessionsLoading = null;
-async function loadSessions() {
+async function loadSessions(silent) {
   if (sessionsLoading) return sessionsLoading;
-  sessionsLoading = loadSessionsInner().finally(() => { sessionsLoading = null; });
+  sessionsLoading = loadSessionsInner(silent === true).finally(() => { sessionsLoading = null; });
   return sessionsLoading;
 }
 function renderSkeleton() {
@@ -360,7 +366,8 @@ function renderSkeleton() {
   note.textContent = 'Cargando sesiones… la primera vez puede tardar hasta 2 minutos.';
   ul.append(note);
 }
-async function loadSessionsInner() {
+async function loadSessionsInner(silent) {
+  const t0 = Date.now();
   const ul = $('sessionList');
   const rb = $('refreshBtn');
   ul.setAttribute('aria-busy', 'true');
@@ -382,10 +389,10 @@ async function loadSessionsInner() {
       b.type = 'button';
       b.className = 'btn btn-primary';
       b.textContent = 'Reintentar';
-      b.addEventListener('click', loadSessions);
+      b.addEventListener('click', () => loadSessions());
       li.append(st, p, b);
       ul.append(li);
-    } else {
+    } else if (!silent) {
       toast('No se pudo actualizar la lista: ' + e.message);
     }
     return [];
@@ -393,6 +400,7 @@ async function loadSessionsInner() {
     ul.setAttribute('aria-busy', 'false');
     if (rb) { rb.classList.remove('spin'); rb.disabled = false; }
   }
+  state.lastListMs = Date.now() - t0;
   state.sessions = res.sessions || [];
   renderSessions();
   return state.sessions;
@@ -500,6 +508,7 @@ function renderSessions() {
 
 function stopEvents() {
   esGen++;
+  setBanner(null);
   exitPollMode();
   clearTimeout(state.esRetry);
   state.esRetry = null;
@@ -513,6 +522,9 @@ function resetChatState() {
   state.running = false;
   state.turnId = null;
   state.queuedTurnId = null;
+  state.turnStartedAt = 0;
+  state.activity = '';
+  state.expanded.clear();
   state.unread = 0;
   state.esFails = 0;
   $('unqueueBtn').classList.add('hidden');
@@ -539,7 +551,12 @@ async function openSession(sessionId, btn, known, opts) {
     const sess = Object.assign({ sessionId }, known || {}, res.session || {});
     show('chatView');
     if (!(opts && opts.noHistory)) {
-      try { history.pushState({ view: 'chat', sessionId }, ''); } catch {}
+      // Ya en una entrada de chat (recarga o cambio de sesion): reemplazar,
+      // para no apilar entradas que el boton atras tendria que deshacer.
+      try {
+        if (history.state && history.state.view === 'chat') history.replaceState({ view: 'chat', sessionId }, '');
+        else history.pushState({ view: 'chat', sessionId }, '');
+      } catch {}
     }
     const title = sessTitle(sess);
     setTopTitle(title, sess.workspaceRoot ? wsName(sess.workspaceRoot) : 'sin carpeta');
@@ -552,7 +569,9 @@ async function openSession(sessionId, btn, known, opts) {
       : 'Sin carpeta de trabajo (sin acceso a archivos)'));
     renderHistory(res.history);
     state.running = !!(res.session && res.session.status === 'running');
+    if (state.running) { state.turnStartedAt = Date.now(); state.activity = 'Trabajando'; }
     setStatus(state.running ? 'running' : 'idle');
+    updateEmpty();
     restoreDraft();
     setComposerH();
     scrollToBottom(false);
@@ -604,6 +623,81 @@ function textOf(item) {
   if (typeof item.output === 'string') return item.output;
   if (typeof item.displayText === 'string') return item.displayText;
   return '';
+}
+
+// ---- vista legible de herramientas: args JSON -> resumen + diff ----
+function parseArgs(a) {
+  if (a && typeof a === 'object') return a;
+  if (typeof a !== 'string') return null;
+  try { const v = JSON.parse(a); return v && typeof v === 'object' ? v : null; } catch { return null; }
+}
+function looksLikeDiff(t) {
+  return typeof t === 'string' && /^(diff --git |--- |\+\+\+ |@@ )/m.test(t) && /^[+-]/m.test(t);
+}
+function lineDiff(oldS, newS) {
+  const out = [];
+  if (oldS) for (const l of String(oldS).split('\n')) out.push('-' + l);
+  if (newS) for (const l of String(newS).split('\n')) out.push('+' + l);
+  return out.join('\n');
+}
+function diffStats(diff) {
+  let add = 0;
+  let del = 0;
+  for (const l of String(diff || '').split('\n')) {
+    if (l.startsWith('+++') || l.startsWith('---')) continue;
+    if (l.startsWith('+')) add++;
+    else if (l.startsWith('-')) del++;
+  }
+  return { add, del };
+}
+function toolView(item) {
+  const parsed = parseArgs(item.args);
+  const a = parsed || {};
+  let cmd = item.commandText || a.command || a.cmd || a.commandText || a.argv || '';
+  if (Array.isArray(cmd)) cmd = cmd.join(' ');
+  const path = a.path || a.file_path || a.filePath || a.file || a.target_file || '';
+  const pattern = a.pattern || a.query || a.regex || '';
+  let summary = '';
+  if (cmd) summary = '$ ' + String(cmd);
+  else if (path) summary = String(path);
+  else if (pattern) summary = String(pattern);
+  else if (a.url) summary = String(a.url);
+  let diff = null;
+  if (typeof a.diff === 'string') diff = a.diff;
+  else if (typeof a.patch === 'string') diff = a.patch;
+  else if (typeof a.old_string === 'string' || typeof a.new_string === 'string') diff = lineDiff(a.old_string || '', a.new_string || '');
+  else if (typeof a.oldText === 'string' || typeof a.newText === 'string') diff = lineDiff(a.oldText || '', a.newText || '');
+  else if (typeof a.content === 'string' && path) diff = lineDiff('', a.content);
+  const st = diff ? diffStats(diff) : { add: 0, del: 0 };
+  return { summary: summary.replace(/\s+/g, ' ').slice(0, 300), diff, add: st.add, del: st.del, parsed: !!parsed, args: parsed };
+}
+function renderDiff(diff) {
+  const pre = document.createElement('pre');
+  pre.className = 'diff';
+  const lines = String(diff).split('\n');
+  const MAX = 500;
+  lines.slice(0, MAX).forEach((l) => {
+    const span = document.createElement('span');
+    if (l.startsWith('+') && !l.startsWith('+++')) span.className = 'd-add';
+    else if (l.startsWith('-') && !l.startsWith('---')) span.className = 'd-del';
+    else if (l.startsWith('@@') || l.startsWith('diff ') || l.startsWith('+++') || l.startsWith('---')) span.className = 'd-hunk';
+    span.textContent = l + '\n';
+    pre.append(span);
+  });
+  if (lines.length > MAX) {
+    const more = document.createElement('span');
+    more.className = 'd-hunk';
+    more.textContent = `… ${lines.length - MAX} líneas más`;
+    pre.append(more);
+  }
+  return pre;
+}
+function fmtElapsed(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  if (s < 60) return s + ' s';
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m} min ${String(s % 60).padStart(2, '0')} s`;
+  return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
 }
 
 // ---- markdown ligero y seguro (solo nodos de texto, nunca innerHTML) ----
@@ -697,7 +791,13 @@ function renderRich(text, plain) {
         root.append(s);
         return; // .md-h es bloque: sin salto extra
       }
-      appendInline(root, line);
+      const li = /^(\s*)[-*+]\s+(.*)$/.exec(line);
+      if (li) {
+        root.append(document.createTextNode(li[1] + '• '));
+        appendInline(root, li[2]);
+      } else {
+        appendInline(root, line);
+      }
       if (i < lines.length - 1) root.append(document.createTextNode('\n'));
     });
   }
@@ -720,6 +820,13 @@ async function copyText(t) {
   vibrate(8);
 }
 
+const ITEM_STATUS = {
+  completed: 'hecho', succeeded: 'hecho', done: 'hecho', running: 'en curso', inProgress: 'en curso',
+  started: 'en curso', pending: 'pendiente', failed: 'error', error: 'error', denied: 'denegado',
+  cancelled: 'cancelado', canceled: 'cancelado', interrupted: 'detenido', backgrounded: 'en segundo plano',
+};
+function statusText(s) { return ITEM_STATUS[s] || s; }
+function isFinished(s) { return /complet|succe|done|fail|error|cancel|denied|interrupt/i.test(String(s || '')); }
 const KIND_LABEL = {
   userMessage: 'Tú', agentMessage: 'Muse', reasoning: 'Razonamiento', toolCall: 'Herramienta',
   userShell: 'Shell', subagent: 'Subagente', workflow: 'Workflow', reminderChild: 'Sistema', message: 'Mensaje',
@@ -760,16 +867,35 @@ function renderItem(item) {
   const acts = document.createElement('div');
   acts.className = 'btns';
 
-  if (item.toolName || item.args) {
+  const isTool = kind === 'toolCall' || kind === 'userShell';
+  const tv = isTool ? toolView(item) : null;
+  if (tv && tv.diff) body.append(renderDiff(tv.diff));
+  else if (item.toolName || item.args) {
     const pre = document.createElement('pre');
-    pre.textContent = (item.toolName || '') + (item.args ? ' ' + String(item.args).slice(0, 2000) : '');
+    pre.textContent = tv && tv.parsed
+      ? JSON.stringify(tv.args, null, 2).slice(0, 3000)
+      : (item.toolName || '') + (item.args ? ' ' + String(item.args).slice(0, 2000) : '');
     body.append(pre);
   }
   if (t) {
-    if (kind === 'toolCall' || kind === 'userShell') {
-      const pre = document.createElement('pre');
-      pre.textContent = t;
-      body.append(pre);
+    if (isTool) {
+      if (looksLikeDiff(t)) body.append(renderDiff(t));
+      else {
+        const pre = document.createElement('pre');
+        pre.className = 'out';
+        pre.textContent = t;
+        body.append(pre);
+      }
+    } else if (kind === 'userMessage' && t.length > 600 && !state.expanded.has(id)) {
+      const rich = renderRich(t, true);
+      rich.classList.add('clamp');
+      body.append(rich);
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'more-btn';
+      more.textContent = 'Ver más';
+      more.addEventListener('click', () => { state.expanded.add(id); renderItem(state.items.get(id) || item); });
+      body.append(more);
     } else {
       body.append(renderRich(t, kind === 'userMessage'));
     }
@@ -820,7 +946,7 @@ function renderItem(item) {
       await rpc('subagent/stop', { commandId: await newCommandId(), sessionId: state.sessionId, subagentId: sid });
     }));
   }
-  if (kind === 'toolCall' && item.itemId) {
+  if (kind === 'toolCall' && item.itemId && !isFinished(item.status)) {
     const tid = item.itemId;
     acts.append(msgButton('Pasar a fondo', async () => {
       await rpc('task/background', { commandId: await newCommandId(), sessionId: state.sessionId, taskId: tid });
@@ -837,7 +963,7 @@ function renderItem(item) {
     const c = document.createElement('span');
     c.className = 'status-chip';
     c.dataset.s = item.status;
-    c.textContent = item.status;
+    c.textContent = statusText(item.status);
     return c;
   };
   if (COLLAPSIBLE.has(kind)) {
@@ -846,8 +972,30 @@ function renderItem(item) {
     const lab = document.createElement('span');
     lab.className = 'sum-txt';
     const base = KIND_LABEL[kind] || kind;
-    lab.textContent = kind === 'toolCall' ? `${base} · ${labelFor(item)}` : base;
+    const title = document.createElement('span');
+    title.className = 'sum-title';
+    title.textContent = kind === 'toolCall' ? labelFor(item) : base;
+    lab.append(title);
+    if (tv && tv.summary) {
+      const det2 = document.createElement('span');
+      det2.className = 'sum-detail';
+      det2.textContent = tv.summary;
+      lab.append(det2);
+    }
     sum.append(icon('chevron'), lab);
+    if (tv && (tv.add || tv.del)) {
+      const ds = document.createElement('span');
+      ds.className = 'diff-stat';
+      ds.setAttribute('aria-label', `${tv.add} líneas añadidas, ${tv.del} eliminadas`);
+      const ad = document.createElement('span');
+      ad.className = 'd-add';
+      ad.textContent = '+' + tv.add;
+      const de = document.createElement('span');
+      de.className = 'd-del';
+      de.textContent = '−' + tv.del;
+      ds.append(ad, de);
+      sum.append(ds);
+    }
     const sc = statusChip();
     if (sc) sum.append(sc);
     const inner = document.createElement('div');
@@ -879,6 +1027,7 @@ function renderItem(item) {
   const hide = kind === 'reminderChild' && !state.showSys;
   host.classList.toggle('hidden', hide);
   updateSysBtn();
+  if (!hide) $('chatEmpty').classList.add('hidden');
   return !li && !hide;
 }
 function updateSysBtn() {
@@ -888,6 +1037,83 @@ function updateSysBtn() {
   for (const it of state.items.values()) if (it.kind === 'reminderChild') n++;
   b.setAttribute('aria-pressed', state.showSys ? 'true' : 'false');
   b.textContent = 'Mensajes de sistema' + (n ? ` (${n})` : '');
+}
+
+// Avisos en la conversacion (turno fallido, detenido, duracion).
+function addNotice(kind, text) {
+  const li = document.createElement('li');
+  li.className = 'notice msg-enter';
+  li.dataset.notice = kind;
+  li.textContent = text;
+  const stick = isNearBottom();
+  $('transcript').append(li);
+  afterRender(stick, stick ? 0 : 1);
+}
+// Indicador "trabajando" con cronometro y ultima actividad (como Codex/Claude).
+let workTimer = null;
+function updateWorking() {
+  const el = $('working');
+  if (!el) return;
+  const on = !!(state.sessionId && state.running && !pendingCount());
+  const wasHidden = el.classList.contains('hidden');
+  el.classList.toggle('hidden', !on);
+  if (!on) { clearInterval(workTimer); workTimer = null; return; }
+  if (!state.turnStartedAt) state.turnStartedAt = Date.now();
+  const tick = () => {
+    $('workingTxt').textContent = (state.activity || 'Trabajando') + '…';
+    $('workingTime').textContent = fmtElapsed(Date.now() - state.turnStartedAt);
+  };
+  tick();
+  if (!workTimer) workTimer = setInterval(tick, 1000);
+  if (wasHidden && isNearBottom()) raf(() => scrollToBottom(false));
+}
+function setActivity(item) {
+  if (!item) return;
+  const done = /complet|succe|done|fail|error|cancel/i.test(item.status || '');
+  if (item.kind === 'toolCall' && !done) state.activity = 'Usando ' + (item.toolName || 'herramienta');
+  else if (item.kind === 'userShell' && !done) state.activity = 'Ejecutando comando';
+  else if (item.kind === 'reasoning') state.activity = 'Pensando';
+  else if (item.kind === 'agentMessage') state.activity = 'Escribiendo';
+  else if (item.kind === 'subagent' && !done) state.activity = 'Subagente trabajando';
+  else return;
+  updateWorking();
+}
+// Notificaciones del sistema cuando la app esta en segundo plano.
+function notify(title, body, tag) {
+  if (!state.notify || !document.hidden) return;
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    const opts = { body: String(body || '').slice(0, 180), tag: tag || 'muse', icon: '/icon.svg', badge: '/icon.svg', renotify: true, data: { sessionId: state.sessionId } };
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.ready.then((r) => r.showNotification(title, opts)).catch(() => {});
+    } else {
+      new Notification(title, opts); // eslint-disable-line no-new
+    }
+  } catch { /* sin soporte */ }
+}
+function updateBadge() {
+  try {
+    const n = pendingCount();
+    if (navigator.setAppBadge) { if (n) navigator.setAppBadge(n); else navigator.clearAppBadge(); }
+  } catch {}
+}
+function syncNotifyBtn() {
+  const b = $('notifyBtn');
+  if (!b) return;
+  b.setAttribute('aria-pressed', state.notify ? 'true' : 'false');
+  b.textContent = state.notify ? 'Notificaciones: sí' : 'Notificaciones';
+}
+// Banner persistente de conexion (en vez de toasts repetidos).
+function setBanner(text) {
+  const b = $('netBanner');
+  if (!b) return;
+  if (!text) { b.classList.add('hidden'); return; }
+  $('netBannerTxt').textContent = text;
+  b.classList.remove('hidden');
+}
+function updateEmpty() {
+  const empty = !!state.sessionId && !$('transcript').querySelector('li:not(.hidden)') && !state.running && !pendingCount();
+  $('chatEmpty').classList.toggle('hidden', !empty);
 }
 
 // Render por lotes: muchos deltas por segundo -> un repintado por frame.
@@ -947,6 +1173,7 @@ function applyViewEvent(method, p) {
         const merged = prev && prev.text && p.item.text === undefined ? Object.assign({}, p.item, { text: prev.text }) : p.item;
         state.items.set(p.item.itemId, merged);
         queueRender(merged);
+        if (state.running) setActivity(merged);
         if (method === 'item/completed' && merged.kind === 'agentMessage') {
           const t = textOf(merged);
           if (t) announce('Muse: ' + t.slice(0, 280));
@@ -961,14 +1188,14 @@ function applyViewEvent(method, p) {
       else cur[field] = (cur[field] || '') + (p.delta || '');
       state.items.set(p.itemId, cur);
       queueRender(cur);
+      if (state.running && state.activity !== 'Escribiendo' && cur.kind === 'agentMessage') setActivity(cur);
       break;
     }
     case 'turn/started':
       state.running = true; state.turnId = p.turnId || null;
-      if (state.queuedTurnId && p.turnId === state.queuedTurnId) {
-        state.queuedTurnId = null;
-        $('unqueueBtn').classList.add('hidden');
-      }
+      state.turnStartedAt = Date.now();
+      state.activity = 'Pensando';
+      if (state.queuedTurnId && p.turnId === state.queuedTurnId) setQueued(null);
       settleStatus();
       break;
     case 'turn/completed':
@@ -976,15 +1203,15 @@ function applyViewEvent(method, p) {
     case 'turn/unqueued':
       // Un turno encolado que termina/se retira no detiene el turno vivo.
       if (method !== 'turn/unqueued' && (!p.turnId || !state.turnId || p.turnId === state.turnId)) {
+        const started = state.turnStartedAt;
         state.running = false;
         state.turnId = null;
+        state.turnStartedAt = 0;
+        state.activity = '';
+        if (method === 'turn/completed') turnOutcome(p, started);
       }
-      if (state.queuedTurnId && p.turnId === state.queuedTurnId) {
-        state.queuedTurnId = null;
-        $('unqueueBtn').classList.add('hidden');
-      }
+      if (state.queuedTurnId && p.turnId === state.queuedTurnId) setQueued(null);
       settleStatus();
-      if (method === 'turn/completed' && document.hidden) vibrate(30);
       break;
     case 'session/statusChanged': {
       const s = liveStatus(p);
@@ -1008,7 +1235,7 @@ function applyViewEvent(method, p) {
       settleStatus();
       break;
     case 'session/modelChanged':
-      if (p.modelId) { $('modelSel').value = p.modelId; commitSelect($('modelSel')); }
+      if (p.modelId) { $('modelSel').value = p.modelId; commitSelect($('modelSel')); updateChips(); }
       break;
     case 'session/approvalModeChanged':
       if (p.mode) { $('approvalSel').value = p.mode; commitSelect($('approvalSel')); }
@@ -1016,6 +1243,27 @@ function applyViewEvent(method, p) {
     default:
       break;
   }
+}
+// Resultado del turno: aviso de error/detenido o duracion, y notificacion.
+function turnOutcome(p, started) {
+  const turn = p.turn || {};
+  const st = String(p.status || p.outcome || turn.status || turn.outcome || '');
+  const e = p.error || turn.error;
+  const errMsg = e ? String(e.message || e) : '';
+  if (errMsg || /fail|error/i.test(st)) {
+    addNotice('error', 'El turno falló' + (errMsg ? ': ' + errMsg : ''));
+    notify('El turno de Muse falló', errMsg || 'Abre la sesión para ver el detalle', 'turn');
+    return;
+  }
+  if (/cancel|interrupt|abort|stopp/i.test(st)) {
+    addNotice('info', 'Turno detenido');
+    return;
+  }
+  if (started && Date.now() - started > 3000) addNotice('done', 'Trabajó ' + fmtElapsed(Date.now() - started));
+  let last = '';
+  for (const it of state.items.values()) if (it.kind === 'agentMessage') last = textOf(it);
+  notify('Muse terminó', last || 'El turno ha terminado', 'turn');
+  if (document.hidden) vibrate(30);
 }
 function pendingCount() { return $('approvals').querySelectorAll('.approval:not(.leaving)').length; }
 function liveStatus(p) {
@@ -1073,6 +1321,7 @@ function renderApproval(p) {
   div.append(btns);
   $('approvals').append(div);
   newCardAlert('Aprobación requerida' + (what ? ': ' + what : ''));
+  notify('Aprobación requerida' + (what ? ' · ' + what : ''), typeof descTxt === 'string' ? descTxt : 'Muse necesita tu permiso', 'appr-' + p.approvalId);
 }
 async function decideApproval(p, choiceId, div, btn) {
   const all = div ? Array.from(div.querySelectorAll('button')) : [];
@@ -1200,6 +1449,8 @@ function renderUserInput(p) {
   div.append(btns);
   $('approvals').append(div);
   newCardAlert('Muse te hace una pregunta');
+  const q0 = (p.questions && p.questions[0]) || {};
+  notify('Muse pregunta', q0.question || q0.header || 'Responde para continuar', 'ui-' + p.userInputId);
 }
 async function refreshPending() {
   const sid = state.sessionId;
@@ -1282,6 +1533,7 @@ function fillModelSelect(models, activeId) {
   if (activeId) sel.value = activeId;
   if (!sel.value && models.length) sel.selectedIndex = 0;
   commitSelect(sel);
+  updateChips();
 }
 // Valor confirmado por el servidor: si un cambio falla, el select vuelve aqui.
 function commitSelect(sel) { sel.dataset.prev = sel.value; }
@@ -1460,7 +1712,7 @@ function connectEvents() {
     let d;
     try { d = JSON.parse(raw); } catch { return; }
     if (type === 'subscribed') {
-      if ((state.esFails || 0) > 0) toast('Conexión en vivo restablecida', 'info');
+      setBanner(null);
       setConn(true); state.esFails = 0;
       netinfo('SSE en vivo' + (state.viewCursor ? ' · cursor ' + state.viewCursor.slice(-12) : ''));
       try { if (d.viewCursor) state.viewCursor = d.viewCursor; } catch {}
@@ -1474,7 +1726,7 @@ function connectEvents() {
     }
     if (type === 'bridge') {
       try {
-        if (d.__bridge === 'host-down') { setConn(false); toast('El proceso de Muse se reinició; reconectando…', 'warn'); }
+        if (d.__bridge === 'host-down') { setConn(false); setBanner('Muse se está reiniciando…'); }
         // Host reiniciado: el stream actual ya no recibe la vista -> re-suscribir.
         if (d.__bridge === 'host-up') scheduleReconnect(myGen, 500);
       } catch {}
@@ -1491,7 +1743,7 @@ function connectEvents() {
     const info = reason + ' · intento #' + state.esFails;
     setConnDetail(info);
     netinfo('SSE: ' + info);
-    if (state.esFails === 1) toast('Conexión en vivo perdida — reintentando…', 'warn');
+    setBanner(navigator.onLine === false ? 'Sin conexión de red — reintentando…' : 'Conexión en vivo perdida — reconectando…');
     scheduleReconnect(myGen, Math.min(30000, 2000 * state.esFails));
   };
   state.es = streamEvents(url, myGen, {
@@ -1511,6 +1763,11 @@ const watchdog = setInterval(() => {
 if (watchdog && watchdog.unref) watchdog.unref(); // solo node (tests): no retener el runner
 
 // ---- composer ----
+function setQueued(tid) {
+  state.queuedTurnId = tid || null;
+  $('unqueueBtn').classList.toggle('hidden', !tid);
+  updateChips();
+}
 function clearImage() {
   state.pendingImage = null;
   const fi = $('fileInput');
@@ -1552,15 +1809,26 @@ function updateChips() {
   box.innerHTML = '';
   const skillSel = $('skillSel');
   const busy = $('busySel').value;
-  const add = (text, label, onClear) => {
+  const add = (text, label, onClear, cls, ic) => {
     const c = document.createElement('button');
     c.type = 'button';
-    c.className = 'chip';
+    c.className = 'chip' + (cls ? ' ' + cls : '');
     c.setAttribute('aria-label', label);
-    c.append(document.createTextNode(text), icon('close'));
+    c.append(document.createTextNode(text), icon(ic || 'close'));
     c.addEventListener('click', onClear);
     box.append(c);
   };
+  // Modelo/esfuerzo siempre a la vista (abre las opciones), como Codex.
+  const ms = $('modelSel');
+  const mName = ms.selectedIndex >= 0 && ms.value ? ms.options[ms.selectedIndex].textContent : '';
+  const eff = $('effortSel').value;
+  if (mName) {
+    const txt = mName + (eff ? ' · ' + eff : '');
+    add(txt, 'Modelo ' + txt + '. Abrir opciones de la sesión', () => $('menuBtn').click(), 'chip-meta', 'chevron');
+  }
+  if (state.queuedTurnId) {
+    add('1 en cola · Desencolar', 'Desencolar el mensaje en cola', () => $('unqueueBtn').click(), 'chip-warn');
+  }
   if (skillSel.value) {
     const name = skillSel.options[skillSel.selectedIndex].textContent;
     add('Skill: ' + name, 'Quitar skill ' + name, () => { skillSel.value = ''; updateChips(); });
@@ -1571,6 +1839,103 @@ function updateChips() {
   }
   box.classList.toggle('hidden', !box.children.length);
 }
+// ---- comandos "/" (skills + acciones) ----
+const SLASH_COMMANDS = [
+  { id: 'compactar', desc: 'Compactar el contexto', btn: 'compactBtn' },
+  { id: 'duplicar', desc: 'Duplicar la sesión', btn: 'forkBtn' },
+  { id: 'historial', desc: 'Cargar historial completo', btn: 'historyBtn' },
+  { id: 'detener', desc: 'Detener el turno en curso', btn: 'cancelBtn' },
+  { id: 'shell', desc: 'Ejecutar un comando: /shell <cmd>', arg: true },
+];
+// Sugerencias para el texto actual del composer (solo "/palabra" sin espacio).
+function slashMatches(text, skills) {
+  const m = /^\/([^\s]*)$/.exec(String(text || ''));
+  if (!m) return [];
+  const q = m[1].toLowerCase();
+  const out = [];
+  for (const c of SLASH_COMMANDS) if (c.id.startsWith(q)) out.push({ type: 'cmd', id: c.id, label: '/' + c.id, desc: c.desc, arg: !!c.arg });
+  for (const sk of skills || []) {
+    const hay = (sk.id + ' ' + (sk.label || '')).toLowerCase();
+    if (!q || hay.includes(q)) out.push({ type: 'skill', id: sk.id, label: '/' + sk.id, desc: sk.label && sk.label !== sk.id ? sk.label : 'Skill' });
+  }
+  return out.slice(0, 8);
+}
+// "/shell ls -la" -> {cmd:'shell', arg:'ls -la'}; solo comandos conocidos.
+function parseSlash(text) {
+  const m = /^\/(\S+)(?:\s+([\s\S]*))?$/.exec(String(text || '').trim());
+  if (!m) return null;
+  const c = SLASH_COMMANDS.find((x) => x.id === m[1].toLowerCase());
+  return c ? { cmd: c.id, arg: (m[2] || '').trim() } : null;
+}
+function skillList() {
+  return Array.from($('skillSel').options).filter((o) => o.value).map((o) => ({ id: o.value, label: o.textContent }));
+}
+function runSlash(cmd, arg) {
+  const c = SLASH_COMMANDS.find((x) => x.id === cmd);
+  if (!c) return false;
+  if (c.id === 'shell') {
+    if (!arg) { toast('Uso: /shell <comando>', 'warn'); return true; }
+    $('shellInput').value = arg;
+    $('shellForm').requestSubmit();
+    return true;
+  }
+  $(c.btn).click();
+  return true;
+}
+let slashActive = 0;
+let slashOpts = [];
+function closeSlash() {
+  slashOpts = [];
+  $('slashMenu').classList.add('hidden');
+  const ta = $('promptInput');
+  ta.setAttribute('aria-expanded', 'false');
+  ta.removeAttribute('aria-activedescendant');
+}
+function updateSlash() {
+  const ta = $('promptInput');
+  slashOpts = slashMatches(ta.value, skillList());
+  const menu = $('slashMenu');
+  if (!slashOpts.length) { closeSlash(); return; }
+  slashActive = Math.min(slashActive, slashOpts.length - 1);
+  menu.innerHTML = '';
+  slashOpts.forEach((o, i) => {
+    const li = document.createElement('li');
+    li.id = 'slash-' + i;
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', i === slashActive ? 'true' : 'false');
+    const a = document.createElement('strong');
+    a.textContent = o.label;
+    const d = document.createElement('span');
+    d.textContent = o.desc;
+    li.append(a, d);
+    li.addEventListener('pointerdown', (e) => { e.preventDefault(); chooseSlash(i); });
+    menu.append(li);
+  });
+  menu.classList.remove('hidden');
+  ta.setAttribute('aria-expanded', 'true');
+  ta.setAttribute('aria-activedescendant', 'slash-' + slashActive);
+}
+function chooseSlash(i) {
+  const o = slashOpts[i];
+  const ta = $('promptInput');
+  if (!o) return;
+  closeSlash();
+  if (o.type === 'skill') {
+    $('skillSel').value = o.id;
+    ta.value = '';
+    updateChips();
+    toast('Skill activa: ' + o.id, 'info');
+  } else if (o.arg) {
+    ta.value = o.label + ' ';
+  } else {
+    ta.value = '';
+    runSlash(o.id, '');
+  }
+  autoGrow();
+  updateSendState();
+  ta.focus();
+}
+
 async function sendPrompt(text) {
   const effort = $('effortSel').value || undefined;
   const ifBusy = $('busySel').value || 'queue';
@@ -1596,12 +1961,10 @@ async function sendPrompt(text) {
     const tid = ack && (ack.turnId || (ack.turn && ack.turn.turnId));
     const disp = ack && (ack.disposition || (ack.turn && ack.turn.disposition));
     if (tid && (disp === 'queued' || (state.turnId && tid !== state.turnId))) {
-      state.queuedTurnId = tid;
-      $('unqueueBtn').classList.remove('hidden');
+      setQueued(tid);
       toast('Mensaje encolado: se enviará al terminar el turno actual', 'info');
     } else {
-      state.queuedTurnId = null;
-      $('unqueueBtn').classList.add('hidden');
+      setQueued(null);
     }
   } catch {}
   // Un turno nuevo puede materializar la vista en vivo: reintentar salir de poll.
@@ -1918,14 +2281,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Composer
   const ta = $('promptInput');
+  ta.setAttribute('aria-autocomplete', 'list');
+  ta.setAttribute('aria-controls', 'slashMenu');
+  ta.setAttribute('aria-expanded', 'false');
+  // Menu "/" con teclado (registrado antes del Enter-para-enviar).
+  ta.addEventListener('keydown', (e) => {
+    if (!slashOpts.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      slashActive = (slashActive + (e.key === 'ArrowDown' ? 1 : -1) + slashOpts.length) % slashOpts.length;
+      updateSlash();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      chooseSlash(slashActive);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      closeSlash();
+    }
+  });
+  ta.addEventListener('blur', () => setTimeout(closeSlash, 150));
   ta.addEventListener('input', () => {
+    slashActive = 0;
+    updateSlash();
     autoGrow();
     updateSendState();
     clearTimeout(draftTimer);
     draftTimer = setTimeout(saveDraft, 400);
   });
   ta.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || e.isComposing) return;
+    if (e.defaultPrevented || e.key !== 'Enter' || e.isComposing) return;
     // Escritorio: Enter envia y Shift+Enter salta linea. Movil: Enter salta
     // linea (el teclado tactil no tiene Shift comodo). Ctrl/Cmd+Enter siempre envia.
     let fine = false;
@@ -1947,6 +2331,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (state.sending) return; // evita doble envio por doble toque
     const text = ta.value.trim();
     if (!text && !state.pendingImage) return;
+    closeSlash();
+    const sl = !state.pendingImage && parseSlash(text);
+    if (sl) {
+      ta.value = '';
+      autoGrow();
+      updateSendState();
+      store(draftKey(), null);
+      runSlash(sl.cmd, sl.arg);
+      return;
+    }
     state.sending = true;
     ta.value = '';
     autoGrow();
@@ -2011,6 +2405,7 @@ document.addEventListener('DOMContentLoaded', () => {
     commandId: await newCommandId(), sessionId: state.sessionId, mode: v,
   }), 'Aprobación');
   $('skillSel').addEventListener('change', updateChips);
+  $('effortSel').addEventListener('change', updateChips);
   $('busySel').addEventListener('change', updateChips);
 
   // Acciones del sheet
@@ -2037,8 +2432,7 @@ document.addEventListener('DOMContentLoaded', () => {
     await rpc('turn/unqueue', {
       commandId: await newCommandId(), sessionId: state.sessionId, turnId: state.queuedTurnId,
     });
-    state.queuedTurnId = null;
-    $('unqueueBtn').classList.add('hidden');
+    setQueued(null);
     toast('Turno desencolado', 'info');
   });
   sheetAction('historyBtn', async () => {
@@ -2090,16 +2484,97 @@ document.addEventListener('DOMContentLoaded', () => {
     finally { setBusy(b, false); }
   });
 
+  // Notificaciones (solo mientras la app sigue viva en segundo plano).
+  state.notify = recall('muse-remote-notify') === '1' && typeof Notification !== 'undefined' && Notification.permission === 'granted';
+  syncNotifyBtn();
+  $('notifyBtn').addEventListener('click', async () => {
+    if (state.notify) {
+      state.notify = false;
+      store('muse-remote-notify', null);
+      syncNotifyBtn();
+      return;
+    }
+    if (typeof Notification === 'undefined') { toast('Este navegador no soporta notificaciones (en iOS instala la app en la pantalla de inicio)', 'warn'); return; }
+    let perm = Notification.permission;
+    if (perm === 'default') { try { perm = await Notification.requestPermission(); } catch {} }
+    if (perm !== 'granted') { toast('Permiso de notificaciones denegado en el navegador', 'warn'); return; }
+    state.notify = true;
+    store('muse-remote-notify', '1');
+    syncNotifyBtn();
+    toast('Te avisaremos de aprobaciones y turnos terminados', 'info');
+  });
+
+  // Sugerencias del chat vacio: rellenan el composer (no envian).
+  for (const b of document.querySelectorAll('#chatEmpty [data-suggest]')) {
+    b.addEventListener('click', () => {
+      ta.value = b.dataset.suggest;
+      autoGrow();
+      updateSendState();
+      ta.focus();
+      try { ta.setSelectionRange(ta.value.length, ta.value.length); } catch {}
+    });
+  }
+
+  // Teclado virtual en iOS: el composer fijo sube con el visualViewport.
+  if (window.visualViewport) {
+    const vv = window.visualViewport;
+    const upd = () => {
+      const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+      document.documentElement.style.setProperty('--kb', kb + 'px');
+    };
+    vv.addEventListener('resize', upd);
+    vv.addEventListener('scroll', upd);
+  }
+
+  // Pull-to-refresh en la lista (el nativo esta anulado por overscroll-behavior).
+  (() => {
+    const ptr = $('ptr');
+    let y0 = null;
+    let dy = 0;
+    const active = () => document.body.dataset.view === 'sessionsView' && !document.querySelector('dialog[open]');
+    window.addEventListener('touchstart', (e) => {
+      if (!active() || window.scrollY > 0 || e.touches.length !== 1) { y0 = null; return; }
+      y0 = e.touches[0].clientY;
+      dy = 0;
+    }, { passive: true });
+    window.addEventListener('touchmove', (e) => {
+      if (y0 === null) return;
+      dy = Math.min(110, Math.max(0, (e.touches[0].clientY - y0) * 0.5));
+      ptr.style.setProperty('--pull', dy + 'px');
+      ptr.classList.toggle('ready', dy > 60);
+      ptr.classList.toggle('pulling', dy > 4);
+    }, { passive: true });
+    const end = () => {
+      if (y0 === null) return;
+      y0 = null;
+      ptr.classList.remove('pulling', 'ready');
+      ptr.style.setProperty('--pull', '0px');
+      if (dy > 60) { vibrate(10); loadSessions(); }
+      dy = 0;
+    };
+    window.addEventListener('touchend', end);
+    window.addEventListener('touchcancel', end);
+  })();
+
+  // Lista viva: refresco silencioso si el listado es rapido (cache caliente).
+  setInterval(() => {
+    if (document.body.dataset.view === 'sessionsView' && !document.hidden && state.sessions && (state.lastListMs || 0) < 10000) {
+      loadSessions(true);
+    }
+  }, 30000);
+
   // Ciclo de vida: al volver a primer plano, revalidar el directo.
   document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && document.body.dataset.view === 'sessionsView' && state.sessions) loadSessions(true);
     if (document.hidden || !state.sessionId) return;
     if (state.pollMode) { if (state.pollTick) state.pollTick(); return; }
     if (!state.es || Date.now() - (state.lastEventAt || 0) > 30000) connectEvents();
   });
-  window.addEventListener('offline', () => { setConn(false); toast('Sin conexión de red', 'warn'); });
+  window.addEventListener('offline', () => { setConn(false); setBanner('Sin conexión de red'); });
   window.addEventListener('online', () => {
-    toast('Conexión de red restablecida', 'info');
+    setBanner(null);
     if (state.sessionId && !state.pollMode) connectEvents();
+    else if (state.token) setConn(true);
   });
 
   updateSysBtn();
@@ -2178,5 +2653,5 @@ async function boot() {
 
 // Exportacion solo para tests node (en navegador `module` no existe).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName };
+  module.exports = { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash };
 }
