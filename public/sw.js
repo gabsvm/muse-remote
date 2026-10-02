@@ -1,6 +1,9 @@
 // Service worker: app-shell offline para la PWA. Nunca cachea /api/*.
-const CACHE = 'muse-remote-v17';
-const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/manifest.webmanifest', '/icon.svg'];
+// Red primero (con revalidacion no-cache del servidor) y cache como respaldo
+// offline: antes era cache-first y la PWA podia quedarse con un app.js viejo
+// hasta que se cambiaba la version del SW.
+const CACHE = 'muse-remote-v18';
+const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/theme.js', '/manifest.webmanifest', '/icon.svg'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
@@ -12,7 +15,22 @@ self.addEventListener('activate', (e) => {
   );
 });
 self.addEventListener('fetch', (e) => {
-  const url = new URL(e.request.url);
-  if (url.pathname.startsWith('/api/')) return; // siempre red
-  e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request)));
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin || url.pathname.startsWith('/api/')) return; // siempre red
+  const isNav = req.mode === 'navigate';
+  // Navegaciones (incl. ?text= del share target) se guardan como "/".
+  const key = isNav ? '/' : req;
+  e.respondWith(
+    fetch(req)
+      .then((res) => {
+        if (res.ok && res.type === 'basic') {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(key, copy)).catch(() => {});
+        }
+        return res;
+      })
+      .catch(() => caches.match(key).then((hit) => hit || (isNav ? caches.match('/index.html') : Response.error())))
+  );
 });

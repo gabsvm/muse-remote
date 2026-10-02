@@ -149,16 +149,25 @@ class MspHost {
     const { file, shell } = resolveMuseBin();
     const child = spawn(file, ['serve'], { stdio: ['pipe', 'pipe', 'pipe'], shell, env: childEnvWithoutMetaKey() });
     this.child = child;
-    child.stdout.on('data', (d) => this.onData(d.toString()));
+    // Sin este handler, escribir en el stdin de un hijo muerto (EPIPE) emite
+    // un 'error' asincrono no capturado que tumba todo el backend.
+    child.stdin.on('error', (e) => { this.lastError = String(e).slice(0, 300); });
+    child.stdout.setEncoding('utf8'); // no partir caracteres multibyte entre chunks
+    child.stdout.on('data', (d) => this.onData(d));
     child.stderr.on('data', (d) => { this.lastStderr = d.toString().slice(0, 500); });
     child.on('exit', (code) => {
+      if (this.child !== child) return; // hijo antiguo (tras shutdown/reinicio)
       this.starting = false;
       this.child = null;
+      this.buf = '';
       this.ready = false;
       for (const [, p] of this.pending) { clearTimeout(p.timer); p.reject(new Error('msp host exited')); }
       this.pending.clear();
       this.emit({ __bridge: 'host-down', code });
-      if (!this.closed) setTimeout(() => this.start(), 2000); // sesiones durables: resume tras reinicio
+      if (!this.closed) {
+        const t = setTimeout(() => this.start(), 2000); // sesiones durables: resume tras reinicio
+        if (t.unref) t.unref();
+      }
     });
     child.on('error', (e) => { this.lastError = String(e).slice(0, 300); });
     // Handshake SS1.4.1: initialize -> initialized (notificacion).
@@ -200,7 +209,7 @@ class MspHost {
     // se responde recibo de presentacion SS5.3.3 y se difunde a la UI.
     if (msg.method && msg.id !== undefined && msg.result === undefined && msg.error === undefined) {
       try {
-        this.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} }) + '\n');
+        if (this.child) this.child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result: {} }) + '\n');
       } catch { /* noop */ }
       this.emit(msg);
       return;
@@ -371,7 +380,8 @@ function serveStatic(req, res, pathname) {
         return;
       }
       setSecurityHeaders(res);
-      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream' });
+      // no-cache: el navegador/SW revalida siempre y nunca sirve una PWA vieja.
+      res.writeHead(200, { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' });
       res.end(data);
     });
   });
@@ -389,7 +399,14 @@ function imagePartTooLarge(params) {
   return false;
 }
 
-const server = http.createServer(async (req, res) => {
+const server = http.createServer((req, res) => {
+  handle(req, res).catch((e) => {
+    console.error('[http] error no capturado: ' + String((e && e.message) || e));
+    if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'internal error' });
+    else { try { res.end(); } catch { /* noop */ } }
+  });
+});
+async function handle(req, res) {
   let u;
   try {
     u = new URL(req.url, 'http://x');
@@ -455,23 +472,26 @@ const server = http.createServer(async (req, res) => {
       try { res.write('event: ping\ndata: {}\n\n: ping\n\n'); } catch { /* noop */ }
     }, 25000);
     if (keep.unref) keep.unref();
-    req.on('close', () => { clearInterval(keep); off(); });
+    // res 'close' = socket cerrado por el cliente (req 'close' puede
+    // dispararse al terminar de leer la peticion en Node moderno).
+    let gone = false;
+    res.on('close', () => { gone = true; clearInterval(keep); off(); });
     // Suscripcion live a la vista (SS4.7.1). Desde "ahora" si no hay cursor.
     const after = u.searchParams.get('after');
     try {
       const sub = await msp.request('view/subscribe', after ? { sessionId, after } : { sessionId });
-      send('subscribed', sub || {});
+      if (!gone) send('subscribed', sub || {});
     } catch (e) {
       console.error('[events] subscribe fallo: ' + String((e && e.message) || e));
-      send('error', { error: String((e && e.message) || e) });
+      if (!gone) send('error', { error: String((e && e.message) || e) });
     }
     return;
   }
-  if (req.method === 'GET') return serveStatic(req, res, pathname);
+  if (req.method === 'GET' || req.method === 'HEAD') return serveStatic(req, res, pathname);
   setSecurityHeaders(res);
-  res.writeHead(405);
+  res.writeHead(405, { allow: 'GET, HEAD, POST' });
   res.end();
-});
+}
 
 // Evita que un decodeURIComponent invalido u otro error de ruta tumbe el
 // servidor: cualquier excepcion no capturada en el handler responde 500.

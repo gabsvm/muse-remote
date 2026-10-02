@@ -2,63 +2,188 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#101614">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141b17" media="(prefers-color-scheme: dark)">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Muse Remote">
+<meta name="description" content="Control remoto local para Muse Code">
 <title>Muse Remote</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
 <link rel="stylesheet" href="/styles.css">
+<!-- Aplica el tema guardado antes de pintar (sin parpadeo). -->
+<script src="/theme.js"></script>
 </head>
-<body>
-<header class="topbar">
-  <span class="brand">Muse Remote</span>
-  <span id="conn" class="pill" data-state="off">off</span>
-  <button id="themeBtn" class="ghost" type="button" aria-label="Cambiar tema">Tema</button>
-  <button id="logoutBtn" class="ghost hidden" type="button">Salir</button>
+<body data-view="loginView">
+<!-- Sprite de iconos: se usan con <svg><use href="#i-..."/></svg>. -->
+<svg xmlns="http://www.w3.org/2000/svg" class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6" class="fill"/><circle cx="12" cy="12" r="1.6" class="fill"/><circle cx="19" cy="12" r="1.6" class="fill"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+  <symbol id="i-logout" viewBox="0 0 24 24"><path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 17l5-5-5-5M15 12H4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></symbol>
+  <symbol id="i-image" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><circle cx="9" cy="10" r="1.6"/><path d="M20.5 16l-5-5L6 19.5"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2" class="fill"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 5.6A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3 3.8M6.6 6.6A16.6 16.6 0 0 0 2.5 12S6 18.5 12 18.5a9.6 9.6 0 0 0 4.4-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6a2.5 2.5 0 0 0-2.5-2.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v14M5.5 12.5L12 19l6.5-6.5"/></symbol>
+  <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="M7 9.5l3 2.5-3 2.5M12.5 15h4.5"/></symbol>
+</svg>
+
+<a class="skip" href="#main">Saltar al contenido</a>
+
+<header class="topbar" id="topbar">
+  <button id="backBtn" class="icon-btn hidden" type="button" aria-label="Volver a sesiones">
+    <svg class="ic" aria-hidden="true"><use href="#i-back"/></svg>
+  </button>
+  <div class="top-title">
+    <span id="topTitle" class="brand">Muse Remote</span>
+    <span id="topSub" class="top-sub hidden"></span>
+  </div>
+  <span id="statusBadge" class="pill hidden" data-state="idle" role="status" aria-label="Estado de la sesión: listo">listo</span>
+  <span id="conn" class="conn" data-state="off" role="status" aria-label="Conexión: sin conexión" title="">offline</span>
+  <button id="themeBtn" class="icon-btn" type="button" aria-label="Cambiar a tema oscuro">
+    <svg class="ic" aria-hidden="true"><use id="themeIcon" href="#i-moon"/></svg>
+  </button>
+  <button id="menuBtn" class="icon-btn hidden" type="button" aria-label="Opciones de la sesión" aria-haspopup="dialog" aria-controls="sheet">
+    <svg class="ic" aria-hidden="true"><use href="#i-more"/></svg>
+  </button>
+  <button id="logoutBtn" class="icon-btn hidden" type="button" aria-label="Cerrar sesión en este dispositivo">
+    <svg class="ic" aria-hidden="true"><use href="#i-logout"/></svg>
+  </button>
 </header>
 
-<main>
-  <section id="loginView" class="card">
-    <h1>Acceso local</h1>
-    <p class="muted">Introduce el token que muestra el backend al arrancar. Se guarda solo en este dispositivo.</p>
-    <label>Token
-      <input id="tokenInput" type="password" autocomplete="off" inputmode="text" placeholder="token local">
-    </label>
-    <button id="loginBtn" type="button">Conectar</button>
-    <p id="loginErr" class="err" role="alert"></p>
+<main id="main">
+  <!-- ===== Login ===== -->
+  <section id="loginView" class="view" aria-labelledby="loginTitle">
+    <form id="loginForm" class="card login-card" novalidate>
+      <div class="login-logo" aria-hidden="true"><img src="/icon.svg" alt="" width="56" height="56"></div>
+      <h1 id="loginTitle" tabindex="-1" data-view-focus>Acceso local</h1>
+      <p class="muted">Introduce el token que muestra el backend al arrancar. Se guarda solo en este dispositivo.</p>
+      <label for="tokenInput">Token</label>
+      <div class="input-group">
+        <input id="tokenInput" type="password" autocomplete="current-password" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="token local" aria-describedby="loginErr" required>
+        <button id="tokenToggle" class="icon-btn in-input" type="button" aria-label="Mostrar token" aria-pressed="false">
+          <svg class="ic" aria-hidden="true"><use href="#i-eye"/></svg>
+        </button>
+      </div>
+      <button id="loginBtn" class="btn btn-primary btn-block" type="submit">
+        <span class="spinner" aria-hidden="true"></span><span class="btn-label">Conectar</span>
+      </button>
+      <p id="loginErr" class="err" role="alert" aria-live="assertive"></p>
+    </form>
   </section>
 
-  <section id="sessionsView" class="hidden">
-    <div class="row">
-      <h1>Sesiones</h1>
-      <button id="hiddenBtn" class="ghost" type="button" title="Ver sesiones ocultas">Ocultas</button>
-      <button id="newBtn" type="button">Nueva</button>
+  <!-- ===== Sesiones ===== -->
+  <section id="sessionsView" class="view hidden" aria-labelledby="sessionsTitle">
+    <div class="view-head">
+      <h1 id="sessionsTitle" tabindex="-1" data-view-focus>Sesiones</h1>
+      <button id="refreshBtn" class="icon-btn" type="button" aria-label="Actualizar lista de sesiones">
+        <svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg>
+      </button>
+      <button id="newBtn" class="btn btn-primary" type="button">
+        <svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg><span class="btn-label">Nueva</span>
+      </button>
     </div>
-    <div class="tabs" role="tablist" aria-label="Filtrar sesiones">
-      <button id="tabChats" class="ghost" type="button" role="tab" aria-selected="true">Chats</button>
-      <button id="tabEmpty" class="ghost" type="button" role="tab" aria-selected="false">Vacías</button>
+
+    <div id="usageCard" class="usage-card" aria-labelledby="usageTitle">
+      <span id="usageTitle" class="usage-title">Uso de la suscripción</span>
+      <div id="usageLine" class="usage-body muted">—</div>
     </div>
-    <ul id="sessionList" class="sessions"></ul>
+
+    <div class="search">
+      <svg class="ic" aria-hidden="true"><use href="#i-search"/></svg>
+      <label for="searchInput" class="sr-only">Buscar sesiones</label>
+      <input id="searchInput" type="search" placeholder="Buscar por título o carpeta" autocomplete="off" enterkeyhint="search">
+    </div>
+
+    <div class="list-tools">
+      <div class="tabs" role="tablist" aria-label="Filtrar sesiones">
+        <button id="tabChats" type="button" role="tab" aria-selected="true" aria-controls="sessionPanel" tabindex="0">Chats</button>
+        <button id="tabEmpty" type="button" role="tab" aria-selected="false" aria-controls="sessionPanel" tabindex="-1">Vacías</button>
+      </div>
+      <button id="hiddenBtn" class="chip-btn" type="button" aria-pressed="false">Ocultas</button>
+    </div>
+
+    <div id="sessionPanel" role="tabpanel" aria-labelledby="tabChats">
+      <ul id="sessionList" class="sessions" aria-busy="false"></ul>
+    </div>
   </section>
 
-  <section id="chatView" class="hidden">
-    <div class="row">
-      <button id="backBtn" class="ghost" type="button">&larr; Sesiones</button>
-      <span id="statusBadge" class="pill" data-state="idle">idle</span>
-      <button id="sysBtn" class="ghost" type="button" title="Mostrar/ocultar mensajes internos">Sistema</button>
+  <!-- ===== Chat ===== -->
+  <section id="chatView" class="view hidden" aria-labelledby="chatTitle">
+    <h1 id="chatTitle" class="sr-only" tabindex="-1" data-view-focus>Chat</h1>
+    <div id="wsLine" class="ws-line muted"></div>
+    <ol id="transcript" class="transcript" aria-label="Conversación"></ol>
+    <div id="approvals" class="approvals" role="region" aria-label="Solicitudes pendientes"></div>
+
+    <button id="jumpBtn" class="jump-btn" type="button" aria-label="Ir al final de la conversación" hidden>
+      <svg class="ic" aria-hidden="true"><use href="#i-down"/></svg>
+      <span id="jumpCount" class="jump-count hidden"></span>
+    </button>
+
+    <form id="composer" class="composer" aria-label="Enviar mensaje">
+      <div id="chips" class="chips hidden"></div>
+      <div id="imgPreview" class="img-preview hidden"></div>
+      <div class="composer-row">
+        <button type="button" id="attachBtn" class="icon-btn" aria-label="Adjuntar imagen">
+          <svg class="ic" aria-hidden="true"><use href="#i-image"/></svg>
+        </button>
+        <input type="file" id="fileInput" accept="image/*" class="hidden" tabindex="-1" aria-hidden="true">
+        <button type="button" id="micBtn" class="icon-btn" aria-label="Dictar por voz" aria-pressed="false">
+          <svg class="ic" aria-hidden="true"><use href="#i-mic"/></svg>
+        </button>
+        <label for="promptInput" class="sr-only">Mensaje para Muse</label>
+        <textarea id="promptInput" rows="1" placeholder="Escribe un mensaje…" enterkeyhint="send" autocomplete="off"></textarea>
+        <button type="button" id="cancelBtn" class="icon-btn stop-btn hidden" aria-label="Detener turno en curso">
+          <svg class="ic" aria-hidden="true"><use href="#i-stop"/></svg>
+        </button>
+        <button type="submit" id="sendBtn" class="send-btn" aria-label="Enviar" disabled>
+          <span class="spinner" aria-hidden="true"></span>
+          <svg class="ic" aria-hidden="true"><use href="#i-send"/></svg>
+        </button>
+      </div>
+    </form>
+  </section>
+</main>
+
+<!-- ===== Bottom sheet: opciones de la sesión ===== -->
+<dialog id="sheet" class="sheet" aria-labelledby="sheetTitle">
+  <div class="sheet-inner">
+    <div class="sheet-grab" aria-hidden="true"><span></span></div>
+    <div class="sheet-head">
+      <h2 id="sheetTitle">Opciones de la sesión</h2>
+      <button id="sheetClose" class="icon-btn" type="button" aria-label="Cerrar opciones">
+        <svg class="ic" aria-hidden="true"><use href="#i-close"/></svg>
+      </button>
     </div>
-    <div id="wsLine" class="muted" style="font-size:.8rem;margin-top:.3rem"></div>
-    <div id="metaRow" class="meta">
-      <label>Modelo <select id="modelSel"></select></label>
-      <label>Effort
+
+    <h3 class="sheet-sub">Ajustes</h3>
+    <div class="grid2">
+      <label class="field">Modelo <select id="modelSel"></select></label>
+      <label class="field">Esfuerzo
         <select id="effortSel">
-          <option value="">(sesion)</option>
+          <option value="">(sesión)</option>
           <option>none</option><option>minimal</option><option>low</option>
           <option>medium</option><option>high</option><option>xhigh</option>
           <option>max</option><option>ultra</option>
         </select>
       </label>
-      <label>Aprobación
+      <label class="field">Aprobación
         <select id="approvalSel">
           <option value="">(sesión)</option>
           <option value="allowAll">allowAll</option>
@@ -67,47 +192,55 @@
           <option value="denyUnmatched">denyUnmatched</option>
         </select>
       </label>
-      <label>Si ocupado
+      <label class="field">Si está ocupado
         <select id="busySel">
-          <option value="queue">queue</option>
-          <option value="steer">steer</option>
-          <option value="replace">replace</option>
+          <option value="queue">Encolar</option>
+          <option value="steer">Dirigir</option>
+          <option value="replace">Reemplazar</option>
         </select>
       </label>
-      <label>Skill <select id="skillSel"><option value="">(ninguna)</option></select></label>
-      <button id="cancelBtn" class="ghost" type="button" title="Cancelar turno actual">Stop</button>
-      <button id="steerBtn" class="ghost" type="button" title="Dirigir turno en curso">Dirigir</button>
-      <button id="unqueueBtn" class="ghost hidden" type="button" title="Reclamar turno encolado">Desencolar</button>
-      <button id="historyBtn" class="ghost" type="button" title="Cargar historial completo">Historial</button>
-      <button id="forkBtn" class="ghost" type="button" title="Duplicar sesión">Duplicar</button>
-      <button id="compactBtn" class="ghost" type="button" title="Compactar contexto">Compactar</button>
+      <label class="field span2">Skill <select id="skillSel"><option value="">(ninguna)</option></select></label>
     </div>
-    <div class="meta">
-      <label style="flex:2">Shell
-        <span style="display:flex;gap:.5rem">
-          <input id="shellInput" placeholder="comando en la carpeta de la sesión" enterkeyhint="go">
-          <button id="shellBtn" type="button" style="width:auto">Run</button>
-        </span>
-      </label>
+
+    <h3 class="sheet-sub">Acciones</h3>
+    <div class="actions-grid">
+      <button id="steerBtn" class="btn btn-ghost" type="button">Dirigir turno</button>
+      <button id="unqueueBtn" class="btn btn-ghost hidden" type="button">Desencolar</button>
+      <button id="historyBtn" class="btn btn-ghost" type="button">Cargar historial</button>
+      <button id="forkBtn" class="btn btn-ghost" type="button">Duplicar sesión</button>
+      <button id="compactBtn" class="btn btn-ghost" type="button">Compactar</button>
+      <button id="sysBtn" class="btn btn-ghost" type="button" aria-pressed="false">Mensajes de sistema</button>
     </div>
-    <div class="row" style="margin-top:.5rem">
-      <span class="muted" style="font-size:.8rem">Uso subscripción:</span>
-      <span id="usageLine" class="muted" style="font-size:.8rem">—</span>
-    </div>
-    <div id="approvals"></div>
-    <div id="netinfo" class="netinfo muted"></div>
-    <div id="toast" class="toast hidden" role="status"></div>
-    <ol id="transcript" class="transcript" aria-live="polite"></ol>
-    <div id="imgPreview" class="hidden"></div>
-    <form id="composer" class="composer">
-      <button type="button" id="attachBtn" class="ghost" title="Adjuntar imagen">Img</button>
-      <input type="file" id="fileInput" accept="image/*" class="hidden">
-      <button type="button" id="micBtn" class="ghost" title="Dictar">Mic</button>
-      <textarea id="promptInput" rows="2" placeholder="Escribe un prompt…" enterkeyhint="send"></textarea>
-      <button type="submit" id="sendBtn">Enviar</button>
+
+    <h3 class="sheet-sub">Shell</h3>
+    <form id="shellForm" class="shell-form">
+      <label for="shellInput" class="sr-only">Comando de shell</label>
+      <svg class="ic" aria-hidden="true"><use href="#i-terminal"/></svg>
+      <input id="shellInput" placeholder="comando en la carpeta de la sesión" enterkeyhint="go" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <button id="shellBtn" class="btn btn-primary" type="submit">Ejecutar</button>
     </form>
-  </section>
-</main>
+
+    <p id="netinfo" class="netinfo muted"></p>
+  </div>
+</dialog>
+
+<!-- ===== Diálogo genérico (sustituye prompt/confirm nativos) ===== -->
+<dialog id="dlg" class="dlg" aria-labelledby="dlgTitle" aria-describedby="dlgMsg">
+  <form id="dlgForm" method="dialog" class="dlg-inner">
+    <h2 id="dlgTitle"></h2>
+    <p id="dlgMsg" class="muted"></p>
+    <label id="dlgFieldLabel" for="dlgInput" class="sr-only">Valor</label>
+    <input id="dlgInput" class="hidden" autocomplete="off">
+    <textarea id="dlgArea" class="hidden" rows="3" aria-labelledby="dlgTitle"></textarea>
+    <div class="dlg-btns">
+      <button id="dlgCancel" class="btn btn-ghost" type="button">Cancelar</button>
+      <button id="dlgOk" class="btn btn-primary" type="submit" value="ok">Aceptar</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast hidden" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="announcer" class="sr-only" aria-live="polite" aria-atomic="true"></div>
 
 <script src="/app.js" defer></script>
 </body>

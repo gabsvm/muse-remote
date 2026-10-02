@@ -10,7 +10,7 @@ global.localStorage = {
   setItem(k, v) { this._s[k] = String(v); },
   removeItem(k) { delete this._s[k]; },
 };
-const { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents } = require('../public/app.js');
+const { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName } = require('../public/app.js');
 
 test('parseFrame: evento subscribed simple', () => {
   assert.deepEqual(parseFrame('event: subscribed\ndata: {"a":1}'), { type: 'subscribed', data: '{"a":1}' });
@@ -127,4 +127,54 @@ test('ocultas: guardar, leer y comprobar', () => {
   assert.equal(isHidden('zzz'), false);
   saveHidden([]);
   assert.deepEqual(loadHidden(), []);
+});
+
+test('filterSessions: pestañas, ocultas y busqueda sin red', () => {
+  const list = [
+    { sessionId: 'a', turnCount: 2, firstUserPrompt: 'Arreglar login', workspaceRoot: 'C:\\Dev\\web', updatedAt: '2026-09-22T12:00:00Z' },
+    { sessionId: 'b', turnCount: 1, firstUserPrompt: 'Refactor API', updatedAt: '2026-09-22T11:00:00Z' },
+    { sessionId: 'c', turnCount: 0 },
+  ];
+  const all = filterSessions(list, { tab: 'chats' });
+  assert.deepEqual(all.rows.map((s) => s.sessionId), ['a', 'b']);
+  assert.equal(all.nChats, 2);
+  assert.equal(all.nEmpty, 1);
+  assert.deepEqual(filterSessions(list, { tab: 'empty' }).rows.map((s) => s.sessionId), ['c']);
+  const hid = filterSessions(list, { tab: 'chats', hidden: ['a'] });
+  assert.deepEqual(hid.rows.map((s) => s.sessionId), ['b']);
+  assert.equal(hid.nHidden, 1);
+  assert.equal(filterSessions(list, { tab: 'chats', hidden: ['a'], showHidden: true }).rows.length, 2);
+  assert.deepEqual(filterSessions(list, { tab: 'chats', query: 'WEB' }).rows.map((s) => s.sessionId), ['a']);
+  assert.equal(filterSessions(list, { tab: 'chats', query: 'zzz' }).rows.length, 0);
+});
+
+test('splitFences: texto y codigo, cercado sin cerrar en streaming', () => {
+  assert.deepEqual(splitFences('hola'), [{ type: 'text', text: 'hola' }]);
+  const s = splitFences('antes\n```js\nconst a = 1;\n```\ndespues');
+  assert.equal(s.length, 3);
+  assert.deepEqual(s[1], { type: 'code', lang: 'js', text: 'const a = 1;' });
+  assert.equal(s[2].text, '\ndespues');
+  const open = splitFences('x\n```\nparcial');
+  assert.deepEqual(open[1], { type: 'code', lang: '', text: 'parcial' });
+  assert.deepEqual(splitFences(''), []);
+});
+
+test('parseInline: codigo, negrita y enlaces; nunca HTML', () => {
+  const t = parseInline('usa `npm test` y **ya** ver https://example.com/a.');
+  assert.deepEqual(t.map((x) => x.t), ['text', 'code', 'text', 'bold', 'text', 'link', 'text']);
+  assert.equal(t[1].v, 'npm test');
+  assert.equal(t[3].v, 'ya');
+  assert.equal(t[5].v, 'https://example.com/a');
+  assert.equal(t[6].v, '.');
+  assert.deepEqual(parseInline('<b>x</b>'), [{ t: 'text', v: '<b>x</b>' }]);
+  assert.deepEqual(parseInline('javascript:alert(1)'), [{ t: 'text', v: 'javascript:alert(1)' }]);
+});
+
+test('friendlyError y wsName', () => {
+  assert.match(friendlyError('msp host not ready'), /arrancando/);
+  assert.match(friendlyError('msp timeout: session/list'), /tardó/);
+  assert.equal(friendlyError('otro'), 'otro');
+  assert.equal(wsName('C:\\Dev\\proyecto'), 'proyecto');
+  assert.equal(wsName('/home/u/repo/'), 'repo');
+  assert.equal(wsName(''), '');
 });

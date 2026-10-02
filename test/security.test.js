@@ -163,3 +163,33 @@ test('(6) headers de seguridad + CSP compatible PWA', async () => {
   }
   assert.match(CSP, /style-src 'self' 'unsafe-inline'/); // inline styles de la PWA
 });
+
+// (7) robustez del puente y estaticos.
+test('(7) hijo muerto: escribir en su stdin no tumba el proceso (EPIPE manejado)', () => {
+  const src = fs.readFileSync(require.resolve('../server.js'), 'utf8');
+  assert.match(src, /child\.stdin\.on\('error'/);
+});
+
+test('(7) estaticos con no-cache (la PWA nunca queda obsoleta) y theme.js servido', async () => {
+  for (const p of ['/', '/app.js', '/theme.js', '/sw.js']) {
+    const r = await fetch(base + p);
+    assert.equal(r.status, 200, p);
+    assert.equal(r.headers.get('cache-control'), 'no-cache', p);
+    await r.arrayBuffer();
+  }
+});
+
+test('(7) metodo no soportado: 405 con Allow', async () => {
+  const r = await fetch(base + '/', { method: 'PUT' });
+  assert.equal(r.status, 405);
+  assert.match(r.headers.get('allow') || '', /GET/);
+  await r.arrayBuffer();
+});
+
+test('(7) index.html sin scripts inline (compatible con CSP script-src self)', () => {
+  const html = fs.readFileSync(require.resolve('../public/index.html'), 'utf8');
+  const scripts = html.match(/<script\b[^>]*>/g) || [];
+  assert.ok(scripts.length >= 2);
+  for (const s of scripts) assert.match(s, /\bsrc="\//, 'script inline: ' + s);
+  assert.ok(!/\son[a-z]+="/i.test(html), 'handlers inline en index.html');
+});

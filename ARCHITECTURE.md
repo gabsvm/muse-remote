@@ -91,3 +91,43 @@ Telefono (PWA) --HTTPS--> Tailscale Serve --HTTP--> 127.0.0.1:8787
 - Limites: `/api/rpc` 5 MiB; parte `image` 4 MiB base64; cliente JPEG 1568 px q0.85 con chequeo previo (413 si excede).
 - Estaticos con containment estricto + `decodeURIComponent` invalido -> 400 sin tumbar el servidor.
 - CSP y headers (`nosniff`, `SAMEORIGIN`, `same-origin`, `Permissions-Policy`) en API, estaticos y SSE.
+
+## 5. Auditoria de bugs + UI/UX mobile (2026-10-02)
+
+Bugs corregidos:
+- Backend: un `EPIPE` al escribir en el stdin de un `muse serve` muerto
+  tumbaba todo el proceso (error asincrono sin handler). Ahora se captura.
+- SSE: limpieza con `res.on('close')` (en Node moderno `req` puede emitir
+  `close` al terminar de leer la peticion) y sin escribir tras desconexion.
+- Handler HTTP con `catch` global (500 en vez de rechazo no capturado);
+  `HEAD` soportado y `405` con `Allow`.
+- Estaticos `cache-control: no-cache` + SW red-primero: la PWA ya no se
+  queda con un `app.js` viejo (antes cache-first).
+- Cliente: 401 -> vuelve al login (antes un token invalido guardado dejaba
+  la lista en error); respuestas no JSON y errores de red con mensaje claro;
+  logout ya no deja el watchdog reconectando con token vacio; doble envio
+  por doble toque; aperturas de sesion concurrentes (gana la ultima);
+  estado de turno/encolado no se arrastra entre sesiones; aprobaciones se
+  retiran al decidir (en modo poll no llega `approval/resolved`); estado
+  `waiting` correcto con varias pendientes; selects que revierten si el
+  servidor rechaza el cambio; watchdog sin bucle SSE<->poll; tema que no
+  cambiaba al primer toque con el sistema en oscuro; radios de preguntas
+  con nombres unicos; toasts de reconexion sin spam; re-suscripcion tras
+  reinicio del host MSP.
+
+UI/UX:
+- Topbar compacta (titulo de sesion, estado, conexion) y opciones de la
+  sesion en un bottom sheet (`<dialog>` nativo, deslizar para cerrar).
+- `prompt/confirm/alert` sustituidos por dialogos accesibles propios.
+- Chat: burbujas, markdown ligero y seguro (solo nodos de texto: codigo,
+  negrita, enlaces, titulos), bloques de codigo con copiar, herramientas y
+  razonamiento plegables, autoscroll que respeta la lectura + boton "ir al
+  final" con contador, render por lotes (rAF) para el streaming.
+- Composer: textarea auto-ajustable, enviar/Stop/dictado con estados,
+  pegar imagenes, borrador por sesion, Enter envia en escritorio.
+- Lista: cache local (pestañas/busqueda/ocultar sin red), busqueda,
+  skeleton, estados vacios, barras de uso de la suscripcion.
+- Navegacion con el gesto/boton atras del sistema (history API).
+- Accesibilidad: objetivos >= 44 px, foco visible, patron ARIA de
+  pestañas con flechas, live region para respuestas/aprobaciones, contraste
+  AA, safe areas, `prefers-reduced-motion` y `forced-colors`.
