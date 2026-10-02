@@ -153,3 +153,29 @@ UI/UX:
   listas markdown; teclado de iOS via `visualViewport`.
 - Lista: pull-to-refresh y refresco silencioso cada 30 s si el listado
   es rapido; el historial del navegador no apila entradas de chat.
+
+## 7. Push con la app cerrada, imagenes, cola offline y resaltado (2026-10-02)
+
+- **Web Push sin dependencias** (`push.js`): VAPID ES256 (RFC 8292) y
+  cifrado aes128gcm (RFC 8291) con `crypto` de Node. Claves en
+  `.vapid.json` y suscripciones en `.push-subs.json` (0600, gitignored).
+  Endpoints `GET /api/push/key`, `POST /api/push/subscribe|unsubscribe`
+  (Bearer). El puente avisa de `approval/request`, `userInput/request`
+  (siempre llegan al puente) y `turn/completed` (mientras haya una vista
+  suscrita); deduplica por id y purga suscripciones 404/410. Solo acepta
+  endpoints https publicos (sin IPs ni nombres locales: anti-SSRF).
+  El SW no duplica el aviso si la app esta visible y enfocada; tocarlo
+  abre la sesion. Requisitos: HTTPS (Tailscale Serve) y, en iOS 16.4+,
+  la PWA instalada en la pantalla de inicio. Remitente VAPID configurable
+  con `MUSE_REMOTE_VAPID_SUB` (p. ej. `mailto:tu@correo`).
+- **Imagenes en el historial**: partes `image` de los items (formas
+  habituales, solo `data:image/*`) y, si el host no las devuelve, una
+  miniatura local (320 px, ~40 recientes) del envio propio. Visor a
+  pantalla completa.
+- **Cola sin conexion**: un envio que falla por red (o 503 del host) se
+  guarda en el dispositivo, se muestra como "Pendiente" y se reenvia al
+  reconectar (evento `online`, SSE suscrito, apertura de la sesion, poll).
+  El `commandId` se fija en el primer intento para que MSP deduplique.
+  Las imagenes no se encolan (tamaño).
+- **Resaltado de sintaxis** ligero sin dependencias (JS/TS, Python, Go,
+  Rust, shell, SQL, familia C, YAML/TOML) con paleta clara/oscura.

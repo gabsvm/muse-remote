@@ -9,6 +9,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { URL } = require('url');
+const { PushStore, pushForMsp } = require('./push');
 
 // Solo loopback. Nunca 0.0.0.0 ni exposicion publica (el acceso remoto lo
 // proporciona el usuario con Tailscale Serve por fuera de esta app).
@@ -269,6 +270,16 @@ class MspHost {
 }
 const msp = new MspHost();
 
+// Web Push: avisa al movil aunque la PWA este cerrada. Las peticiones del
+// host (approval/request, userInput/request) llegan siempre al puente; el
+// resto (turn/completed) mientras alguna vista este suscrita.
+const push = new PushStore();
+msp.onEvent((msg) => {
+  const n = pushForMsp(msg);
+  if (!n || push.seen(n.key) || !push.list().length) return;
+  push.send(n.msg, { urgency: n.urgency }).catch(() => { /* noop */ });
+});
+
 // ---- HTTP ----
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -422,6 +433,24 @@ async function handle(req, res) {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
     return sendJson(res, 200, { ok: true, commandId: uuidv7() });
   }
+  if (pathname === '/api/push/key' && req.method === 'GET') {
+    if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    return sendJson(res, 200, { ok: true, publicKey: push.publicKey() });
+  }
+  if ((pathname === '/api/push/subscribe' || pathname === '/api/push/unsubscribe') && req.method === 'POST') {
+    if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    let body;
+    try { body = JSON.parse(await readBody(req, 16 * 1024)); }
+    catch (e) { return sendJson(res, isBodyTooLarge(e) ? 413 : 400, { ok: false, error: 'bad json' }); }
+    const sub = body && body.subscription;
+    if (pathname === '/api/push/unsubscribe') {
+      if (sub && typeof sub.endpoint === 'string') push.remove(sub.endpoint);
+      return sendJson(res, 200, { ok: true });
+    }
+    try { push.add(sub); } catch (e) { return sendJson(res, 400, { ok: false, error: e.message }); }
+    if (body.test) push.send({ title: 'Muse Remote', body: 'Notificaciones activadas', tag: 'test' }).catch(() => {});
+    return sendJson(res, 200, { ok: true });
+  }
   if (req.method === 'POST' && pathname === '/api/rpc') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
     let body;
@@ -519,5 +548,5 @@ module.exports = {
   ALLOWED_METHODS, RPC_BODY_LIMIT, MAX_IMAGE_BASE64_CHARS, CSP,
   DEFAULT_MSP_TIMEOUT, SESSION_LIST_TIMEOUT, METHOD_TIMEOUTS, timeoutForMethod,
   META_ENV_KEY, assertNoMetaApiKey, childEnvWithoutMetaKey,
-  authorized, setSecurityHeaders, imagePartTooLarge,
+  authorized, setSecurityHeaders, imagePartTooLarge, push,
 };

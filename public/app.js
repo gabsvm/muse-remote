@@ -33,6 +33,10 @@ const state = {
   activity: '',
   expanded: new Set(), // mensajes largos desplegados
   notify: false,
+  pushOn: false,
+  thumbs: null, // itemId -> [dataUrl] (miniaturas de imagenes enviadas)
+  pendingThumb: null,
+  flushing: false,
 };
 function loadHidden() {
   try { return JSON.parse(localStorage.getItem('muse-remote-hidden') || '[]'); }
@@ -58,7 +62,7 @@ function friendlyError(msg) {
 async function api(path, opts) {
   let r;
   try { r = await fetch(path, opts); }
-  catch { throw new Error('sin conexión con el backend'); }
+  catch { throw Object.assign(new Error('sin conexión con el backend'), { network: true }); }
   if (r.status === 401) {
     onUnauthorized();
     throw new Error('token incorrecto o caducado');
@@ -74,7 +78,8 @@ async function rpc(method, params) {
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + state.token },
     body: JSON.stringify({ method, params }),
   });
-  if (!j.ok) throw new Error(friendlyError(j.error || ('rpc ' + r.status)));
+  // 503 = Muse aun arrancando: reintentable igual que un corte de red.
+  if (!j.ok) throw Object.assign(new Error(friendlyError(j.error || ('rpc ' + r.status))), { network: r.status === 503 });
   return j.result;
 }
 async function newCommandId() {
@@ -446,6 +451,13 @@ function renderSessions() {
       tag.textContent = 'oculta';
       tt.append(tag);
     }
+    const nOut = outboxFor(s.sessionId).length;
+    if (nOut) {
+      const tag = document.createElement('span');
+      tag.className = 'tag tag-warn';
+      tag.textContent = nOut === 1 ? '1 pendiente' : nOut + ' pendientes';
+      tt.append(tag);
+    }
     tt.append(document.createTextNode(title));
     const m = document.createElement('span');
     m.className = 'sid';
@@ -578,7 +590,9 @@ async function openSession(sessionId, btn, known, opts) {
     raf(() => scrollToBottom(false)); // tras el layout de fuentes/imagenes
     // El stream arranca ya (gapless con viewCursor); el resto en paralelo.
     connectEvents();
+    renderOutbox();
     await Promise.allSettled([refreshModels(res.session), refreshApproval(res.session), refreshSkills(), refreshPending()]);
+    if (seq === state.openSeq && outboxFor(sessionId).length && navigator.onLine !== false) flushOutbox(false);
   } catch (e) {
     if (seq === state.openSeq) toast('No se pudo abrir la sesión: ' + e.message);
   } finally {
@@ -700,6 +714,227 @@ function fmtElapsed(ms) {
   return `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
 }
 
+// ---- resaltado de sintaxis ligero (tokens -> spans, nunca innerHTML) ----
+const KW_C = 'if else for while do switch case default break continue return goto sizeof struct union enum typedef static const void char short int long float double unsigned signed extern volatile class public private protected new delete this try catch throw finally namespace using virtual override template typename import package interface extends implements final abstract var val fun func when object companion is in as let mut fn impl trait match loop pub use mod crate self super where async await yield lambda def elif except raise pass with from global nonlocal del assert not and or print';
+const HL_KW = {
+  js: 'break case catch class const continue debugger default delete do else export extends finally for from function if import in instanceof let new return super switch this throw try typeof var void while with yield async await of static get set',
+  py: 'and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield self',
+  go: 'break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var',
+  rs: 'as async await break const continue crate dyn else enum extern fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait type unsafe use where while',
+  sh: 'if then else elif fi for while until do done case esac in function return local export readonly echo exit set unset cd source alias sudo',
+  sql: 'select from where insert into values update set delete create table drop alter join left right inner outer full on group by order having limit offset as and or not null is primary key foreign references index distinct union all case when then else end',
+  c: KW_C,
+};
+HL_KW.ts = HL_KW.js + ' interface type enum implements declare namespace abstract private protected public readonly keyof as satisfies';
+const HL_LANG = {
+  javascript: 'js', jsx: 'js', mjs: 'js', cjs: 'js', js: 'js', node: 'js', json: 'json', jsonc: 'js',
+  typescript: 'ts', ts: 'ts', tsx: 'ts', python: 'py', py: 'py', py3: 'py', go: 'go', golang: 'go',
+  rust: 'rs', rs: 'rs', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', console: 'sh', powershell: 'sh', ps1: 'sh', pwsh: 'sh',
+  sql: 'sql', c: 'c', h: 'c', cpp: 'c', 'c++': 'c', cc: 'c', cs: 'c', csharp: 'c', java: 'c', kotlin: 'c', kt: 'c', swift: 'c', php: 'c', dart: 'c', scala: 'c',
+  yaml: 'yaml', yml: 'yaml', toml: 'yaml', ini: 'yaml', dockerfile: 'sh', makefile: 'sh', ruby: 'py', rb: 'py', r: 'py',
+};
+const HL_LIT = new Set(['true', 'false', 'null', 'undefined', 'None', 'True', 'False', 'nil', 'NaN', 'Infinity']);
+const HL_RE = {};
+function hlRegex(fam) {
+  if (HL_RE[fam]) return HL_RE[fam];
+  const hash = ['py', 'sh', 'yaml'].includes(fam);
+  const com = fam === 'sql' ? '--[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/' : hash ? '#[^\\n]*' : (fam === 'json' || fam === 'plain') ? '(?!)' : '\\/\\/[^\\n]*|\\/\\*[\\s\\S]*?\\*\\/';
+  const str = (fam === 'py' ? '"""[\\s\\S]*?"""|\'\'\'[\\s\\S]*?\'\'\'|' : '')
+    + '"(?:\\\\.|[^"\\\\\\n])*"|\'(?:\\\\.|[^\'\\\\\\n])*\''
+    + (['js', 'ts', 'go', 'sh'].includes(fam) ? '|`(?:\\\\.|[^`\\\\])*`' : '');
+  const num = '\\b(?:0[xX][\\da-fA-F]+|\\d[\\d_]*(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)\\b';
+  HL_RE[fam] = new RegExp(`(${com})|(${str})|(${num})|([A-Za-z_$][\\w$]*)`, 'g');
+  return HL_RE[fam];
+}
+function highlight(code, lang) {
+  const src = String(code || '');
+  const fam = HL_LANG[String(lang || '').toLowerCase()] || 'plain';
+  if (src.length > 20000) return [{ t: 'txt', v: src }];
+  const kw = new Set((HL_KW[fam] || '').split(' ').filter(Boolean));
+  const re = hlRegex(fam);
+  re.lastIndex = 0;
+  const out = [];
+  const push = (t, v) => {
+    if (!v) return;
+    const last = out[out.length - 1];
+    if (last && last.t === t && t === 'txt') last.v += v; else out.push({ t, v });
+  };
+  let last = 0;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    if (m[0] === '') { re.lastIndex++; continue; }
+    push('txt', src.slice(last, m.index));
+    if (m[1]) push('com', m[1]);
+    else if (m[2]) push('str', m[2]);
+    else if (m[3]) push('num', m[3]);
+    else {
+      const w = m[4];
+      const lw = fam === 'sql' ? w.toLowerCase() : w;
+      if (HL_LIT.has(w)) push('lit', w);
+      else if (kw.has(lw)) push('kw', w);
+      else if (src[re.lastIndex] === '(') push('fn', w);
+      else push('txt', w);
+    }
+    last = re.lastIndex;
+  }
+  push('txt', src.slice(last));
+  return out;
+}
+function renderCode(codeEl, text, lang) {
+  for (const tok of highlight(text, lang)) {
+    if (tok.t === 'txt') { codeEl.append(document.createTextNode(tok.v)); continue; }
+    const sp = document.createElement('span');
+    sp.className = 'tok-' + tok.t;
+    sp.textContent = tok.v;
+    codeEl.append(sp);
+  }
+}
+
+// ---- imagenes en el historial ----
+// Busca partes de imagen en las formas habituales de un item (defensivo:
+// el esquema exacto puede variar). Solo data: de tipos image/*.
+function extractImages(item) {
+  const out = [];
+  if (!item || typeof item !== 'object') return out;
+  for (const arr of [item.images, item.attachments, item.content, item.input, item.parts]) {
+    if (!Array.isArray(arr)) continue;
+    for (const p of arr) {
+      if (!p || typeof p !== 'object') continue;
+      const src = p.source && typeof p.source === 'object' ? p.source : {};
+      const mt = String(p.mediaType || p.mimeType || p.media_type || src.media_type || '');
+      if (p.type !== 'image' && !/^image\//.test(mt)) continue;
+      const data = p.base64Data || p.data || src.data;
+      const type = /^image\/[\w.+-]+$/.test(mt) ? mt : 'image/jpeg';
+      if (typeof data === 'string' && /^[A-Za-z0-9+/=\s]+$/.test(data.slice(0, 256))) out.push('data:' + type + ';base64,' + data.replace(/\s+/g, ''));
+      else if (typeof p.url === 'string' && /^data:image\/[\w.+-]+;base64,/.test(p.url)) out.push(p.url);
+    }
+  }
+  return out.slice(0, 8);
+}
+const THUMBS_KEY = 'muse-remote-thumbs';
+function thumbsMap() {
+  if (!state.thumbs) {
+    state.thumbs = new Map();
+    try {
+      const o = JSON.parse(localStorage.getItem(THUMBS_KEY) || '[]');
+      if (Array.isArray(o)) for (const [k, v] of o) if (typeof k === 'string' && Array.isArray(v)) state.thumbs.set(k, v);
+    } catch {}
+  }
+  return state.thumbs;
+}
+function rememberThumb(itemId, url) {
+  const m = thumbsMap();
+  m.delete(itemId);
+  m.set(itemId, [url]);
+  while (m.size > 40) m.delete(m.keys().next().value); // LRU: ~40 miniaturas
+  try { localStorage.setItem(THUMBS_KEY, JSON.stringify([...m])); } catch { /* cuota llena: solo memoria */ }
+}
+function makeThumb(img, max) {
+  const scale = Math.min(1, max / Math.max(img.width, img.height));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(img.width * scale));
+  cv.height = Math.max(1, Math.round(img.height * scale));
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(img, 0, 0, cv.width, cv.height);
+  return cv.toDataURL('image/jpeg', 0.7);
+}
+function renderImages(urls) {
+  const grid = document.createElement('div');
+  grid.className = 'att-grid';
+  urls.forEach((u, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'att-btn';
+    b.setAttribute('aria-label', `Ver imagen adjunta ${i + 1} a pantalla completa`);
+    const im = document.createElement('img');
+    im.src = u;
+    im.alt = '';
+    im.loading = 'lazy';
+    im.decoding = 'async';
+    b.append(im);
+    b.addEventListener('click', () => openViewer(u));
+    grid.append(b);
+  });
+  return grid;
+}
+function openViewer(url) {
+  const d = $('viewer');
+  $('viewerImg').src = url;
+  openDialog(d);
+  $('viewerClose').focus();
+}
+
+// ---- cola de envio sin conexion (outbox) ----
+// Los mensajes que no se pudieron enviar por red se guardan en este
+// dispositivo y se reenvian al reconectar. El commandId se fija en el primer
+// intento: si la respuesta se perdio, MSP deduplica el reintento.
+const OUTBOX_KEY = 'muse-remote-outbox';
+function outboxLoad() {
+  try { const v = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); return Array.isArray(v) ? v : []; }
+  catch { return []; }
+}
+function outboxSave(list) {
+  try { if (list.length) localStorage.setItem(OUTBOX_KEY, JSON.stringify(list.slice(-50))); else localStorage.removeItem(OUTBOX_KEY); } catch {}
+}
+function outboxAdd(entry) {
+  const e = Object.assign({ id: 'ob-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), createdAt: Date.now() }, entry);
+  delete e.image; // las imagenes no se guardan (tamaño)
+  const l = outboxLoad();
+  l.push(e);
+  outboxSave(l);
+  return e;
+}
+function outboxUpdate(entry) { outboxSave(outboxLoad().map((e) => (e.id === entry.id ? entry : e))); }
+function outboxRemove(id) { outboxSave(outboxLoad().filter((e) => e.id !== id)); }
+function outboxFor(sid) { return outboxLoad().filter((e) => e.sessionId === sid); }
+function isRetryable(err) { return !!(err && err.network); }
+
+// ---- Web Push ----
+function urlB64ToUint8(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+  return Uint8Array.from(raw, (c) => c.charCodeAt(0));
+}
+function pushSupported() {
+  return typeof navigator !== 'undefined' && 'serviceWorker' in navigator && typeof window !== 'undefined' && 'PushManager' in window;
+}
+async function pushSubscribe(test) {
+  if (!pushSupported()) return false;
+  const reg = await navigator.serviceWorker.ready;
+  const { j } = await api('/api/push/key', { headers: { authorization: 'Bearer ' + state.token } });
+  if (!j.ok || !j.publicKey) return false;
+  const key = urlB64ToUint8(j.publicKey);
+  let sub = await reg.pushManager.getSubscription();
+  // Clave VAPID rotada en el backend: la suscripcion antigua ya no sirve.
+  if (sub && sub.options && sub.options.applicationServerKey) {
+    const cur = new Uint8Array(sub.options.applicationServerKey);
+    if (cur.length !== key.length || cur.some((b, i) => b !== key[i])) { try { await sub.unsubscribe(); } catch {} sub = null; }
+  }
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+  const { j: r } = await api('/api/push/subscribe', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + state.token },
+    body: JSON.stringify({ subscription: sub.toJSON(), test: !!test }),
+  });
+  return !!r.ok;
+}
+async function pushUnsubscribe() {
+  if (!pushSupported()) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
+    await api('/api/push/unsubscribe', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer ' + state.token },
+      body: JSON.stringify({ subscription: { endpoint: sub.endpoint } }),
+    }).catch(() => {});
+    await sub.unsubscribe();
+  } catch {}
+}
+
 // ---- markdown ligero y seguro (solo nodos de texto, nunca innerHTML) ----
 // Divide en bloques de texto y de codigo cercados (```). Un cercado sin
 // cerrar (streaming) se trata como codigo hasta el final.
@@ -775,7 +1010,7 @@ function renderRich(text, plain) {
       head.append(lang, cp);
       const pre = document.createElement('pre');
       const code = document.createElement('code');
-      code.textContent = seg.text;
+      renderCode(code, seg.text, seg.lang);
       pre.append(code);
       box.append(head, pre);
       root.append(box);
@@ -877,7 +1112,19 @@ function renderItem(item) {
       : (item.toolName || '') + (item.args ? ' ' + String(item.args).slice(0, 2000) : '');
     body.append(pre);
   }
-  if (t) {
+  // Imagenes del mensaje (del item o miniatura recordada de un envio propio).
+  let imgs = kind === 'userMessage' ? extractImages(item) : [];
+  if (kind === 'userMessage' && !imgs.length && id) {
+    const pt = state.pendingThumb;
+    if (!thumbsMap().has(id) && pt && Date.now() - pt.at < 120000 && (!pt.text || t.includes(pt.text.slice(0, 40)))) {
+      rememberThumb(id, pt.url);
+      state.pendingThumb = null;
+    }
+    imgs = thumbsMap().get(id) || [];
+  }
+  const ut = kind === 'userMessage' && imgs.length ? t.replace(/\s*\[Image #\d+\]/g, '').trim() : t;
+  if (imgs.length) body.append(renderImages(imgs));
+  if (ut) {
     if (isTool) {
       if (looksLikeDiff(t)) body.append(renderDiff(t));
       else {
@@ -886,8 +1133,8 @@ function renderItem(item) {
         pre.textContent = t;
         body.append(pre);
       }
-    } else if (kind === 'userMessage' && t.length > 600 && !state.expanded.has(id)) {
-      const rich = renderRich(t, true);
+    } else if (kind === 'userMessage' && ut.length > 600 && !state.expanded.has(id)) {
+      const rich = renderRich(ut, true);
       rich.classList.add('clamp');
       body.append(rich);
       const more = document.createElement('button');
@@ -897,7 +1144,7 @@ function renderItem(item) {
       more.addEventListener('click', () => { state.expanded.add(id); renderItem(state.items.get(id) || item); });
       body.append(more);
     } else {
-      body.append(renderRich(t, kind === 'userMessage'));
+      body.append(renderRich(ut, kind === 'userMessage'));
     }
   }
   if ((kind === 'subagent' || kind === 'reminderChild') && (item.childSessionId || item.agentPath || item.reminderAgentId || item.fallbackText)) {
@@ -1022,7 +1269,7 @@ function renderItem(item) {
       host.append(bar);
     }
   }
-  if (!li) $('transcript').append(host);
+  if (!li) appendToTranscript(host);
   // Hijos internos del sistema (reminderChild): ocultos salvo toggle.
   const hide = kind === 'reminderChild' && !state.showSys;
   host.classList.toggle('hidden', hide);
@@ -1039,6 +1286,74 @@ function updateSysBtn() {
   b.textContent = 'Mensajes de sistema' + (n ? ` (${n})` : '');
 }
 
+// Los mensajes pendientes de envio quedan siempre al final.
+function appendToTranscript(el) {
+  const tr = $('transcript');
+  const firstPending = tr.querySelector('li.pending');
+  if (firstPending) tr.insertBefore(el, firstPending); else tr.append(el);
+}
+function renderOutbox() {
+  const tr = $('transcript');
+  if (!tr) return;
+  for (const el of tr.querySelectorAll('li.pending')) el.remove();
+  if (!state.sessionId) return;
+  for (const e of outboxFor(state.sessionId)) {
+    const li = document.createElement('li');
+    li.className = 'msg pending msg-enter';
+    li.dataset.kind = 'userMessage';
+    li.dataset.ob = e.id;
+    const k = document.createElement('span');
+    k.className = 'kind';
+    k.textContent = 'Tú';
+    const body = renderRich(e.text || '', true);
+    const foot = document.createElement('div');
+    foot.className = 'pending-foot';
+    const st = document.createElement('span');
+    st.textContent = e.error ? 'No enviado: ' + e.error : (state.flushing ? 'Enviando…' : 'Pendiente · se enviará al reconectar');
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.textContent = 'Reintentar';
+    retry.disabled = state.flushing;
+    retry.addEventListener('click', () => flushOutbox(true));
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.textContent = 'Eliminar';
+    del.addEventListener('click', () => { outboxRemove(e.id); renderOutbox(); updateEmpty(); });
+    foot.append(st, retry, del);
+    li.append(k, body, foot);
+    tr.append(li);
+  }
+  updateEmpty();
+}
+async function flushOutbox(manual) {
+  if (state.flushing || !state.sessionId || !state.token) return;
+  const sid = state.sessionId;
+  const list = outboxFor(sid);
+  if (!list.length) return;
+  state.flushing = true;
+  renderOutbox();
+  let sent = 0;
+  try {
+    for (const e of list) {
+      try {
+        if (!e.commandId) { e.commandId = await newCommandId(); outboxUpdate(e); }
+        await startTurn(e);
+        outboxRemove(e.id);
+        sent++;
+      } catch (err) {
+        if (!isRetryable(err)) { e.error = err.message; outboxUpdate(e); }
+        if (manual) toast('No se pudo enviar: ' + err.message);
+        break;
+      }
+      if (state.sessionId !== sid) break;
+    }
+  } finally {
+    state.flushing = false;
+    renderOutbox();
+  }
+  if (sent) { toast(sent === 1 ? 'Mensaje pendiente enviado' : `${sent} mensajes pendientes enviados`, 'info'); state.lastSendAt = Date.now(); }
+}
+
 // Avisos en la conversacion (turno fallido, detenido, duracion).
 function addNotice(kind, text) {
   const li = document.createElement('li');
@@ -1046,7 +1361,7 @@ function addNotice(kind, text) {
   li.dataset.notice = kind;
   li.textContent = text;
   const stick = isNearBottom();
-  $('transcript').append(li);
+  appendToTranscript(li);
   afterRender(stick, stick ? 0 : 1);
 }
 // Indicador "trabajando" con cronometro y ultima actividad (como Codex/Claude).
@@ -1080,7 +1395,8 @@ function setActivity(item) {
 }
 // Notificaciones del sistema cuando la app esta en segundo plano.
 function notify(title, body, tag) {
-  if (!state.notify || !document.hidden) return;
+  // Con Web Push activo el backend ya avisa (y el SW evita duplicados).
+  if (!state.notify || state.pushOn || !document.hidden) return;
   try {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     const opts = { body: String(body || '').slice(0, 180), tag: tag || 'muse', icon: '/icon.svg', badge: '/icon.svg', renotify: true, data: { sessionId: state.sessionId } };
@@ -1612,6 +1928,7 @@ function enterPollMode(reason) {
         try { await refreshApproval(res.session); } catch {}
       }
       noteAlive();
+      if (outboxFor(sid).length) flushOutbox(false);
     } catch (e) {
       setConnDetail('poll error: ' + e.message);
     }
@@ -1713,6 +2030,7 @@ function connectEvents() {
     try { d = JSON.parse(raw); } catch { return; }
     if (type === 'subscribed') {
       setBanner(null);
+      if (outboxFor(state.sessionId).length) setTimeout(() => flushOutbox(false), 300);
       setConn(true); state.esFails = 0;
       netinfo('SSE en vivo' + (state.viewCursor ? ' · cursor ' + state.viewCursor.slice(-12) : ''));
       try { if (d.viewCursor) state.viewCursor = d.viewCursor; } catch {}
@@ -1936,25 +2254,39 @@ function chooseSlash(i) {
   ta.focus();
 }
 
-async function sendPrompt(text) {
-  const effort = $('effortSel').value || undefined;
-  const ifBusy = $('busySel').value || 'queue';
-  const skill = $('skillSel').value || '';
+// Arranca un turno a partir de una entrada (UI u outbox).
+async function startTurn(e) {
   const parts = [];
-  if (skill) parts.push({ type: 'skill', selector: skill, arguments: text });
-  else if (text) parts.push({ type: 'text', text });
-  if (state.pendingImage) {
-    const im = state.pendingImage;
-    if (imageBase64TooLarge(im.base64Data)) throw new Error('imagen demasiado grande (máx 4 MiB en base64)');
-    parts.push({ type: 'image', base64Data: im.base64Data, mediaType: im.mediaType, width: im.width, height: im.height });
+  if (e.skill) parts.push({ type: 'skill', selector: e.skill, arguments: e.text || '' });
+  else if (e.text) parts.push({ type: 'text', text: e.text });
+  if (e.image) {
+    if (imageBase64TooLarge(e.image.base64Data)) throw new Error('imagen demasiado grande (máx 4 MiB en base64)');
+    parts.push({ type: 'image', base64Data: e.image.base64Data, mediaType: e.image.mediaType, width: e.image.width, height: e.image.height });
   }
-  if (!parts.length) return;
-  const params = {
-    commandId: await newCommandId(), sessionId: state.sessionId,
-    input: parts, ifBusy,
+  if (!parts.length) return null;
+  if (!e.commandId) e.commandId = await newCommandId();
+  const params = { commandId: e.commandId, sessionId: e.sessionId, input: parts, ifBusy: e.ifBusy || 'queue' };
+  if (e.effort) params.reasoningEffort = e.effort;
+  return rpc('turn/start', params);
+}
+async function sendPrompt(text) {
+  const im = state.pendingImage;
+  const entry = {
+    sessionId: state.sessionId, text,
+    effort: $('effortSel').value || undefined,
+    ifBusy: $('busySel').value || 'queue',
+    skill: $('skillSel').value || '',
+    image: im ? { base64Data: im.base64Data, mediaType: im.mediaType, width: im.width, height: im.height } : null,
   };
-  if (effort) params.reasoningEffort = effort;
-  const ack = await rpc('turn/start', params);
+  if (!entry.text && !entry.image) return;
+  let ack;
+  try {
+    ack = await startTurn(entry);
+  } catch (err) {
+    err.entry = entry;
+    throw err;
+  }
+  if (im && im.thumb) state.pendingThumb = { url: im.thumb, text, at: Date.now() };
   clearImage();
   // Capturar turno encolado para ofrecer Desencolar (ack.turnId != turno live).
   try {
@@ -1989,7 +2321,9 @@ function attachImage(file) {
     const dataUrl = cv.toDataURL('image/jpeg', 0.85);
     const b64 = dataUrl.split(',')[1] || '';
     if (imageBase64TooLarge(b64)) { toast('Imagen demasiado grande tras comprimir (máx 4 MiB)'); return; }
-    state.pendingImage = { base64Data: b64, mediaType: 'image/jpeg', width: w, height: h };
+    let thumb = null;
+    try { thumb = makeThumb(img, 320); } catch {}
+    state.pendingImage = { base64Data: b64, mediaType: 'image/jpeg', width: w, height: h, thumb };
     const pv = $('imgPreview');
     pv.innerHTML = '';
     const th = document.createElement('img');
@@ -2082,6 +2416,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Share Target de Android (?text/?url/?title) -> prefill del composer.
   try {
     const sq = new URLSearchParams(location.search);
+    const fromNotif = sq.get('session');
+    if (fromNotif) { state.openOnBoot = fromNotif; history.replaceState(null, '', location.pathname); }
     const shared = [sq.get('title'), sq.get('text'), sq.get('url')].filter(Boolean).join('\n');
     if (shared) {
       state.sharedText = shared;
@@ -2352,9 +2688,18 @@ document.addEventListener('DOMContentLoaded', () => {
       state.lastSendAt = Date.now();
       scrollToBottom(false);
     } catch (err) {
-      ta.value = text;
-      autoGrow();
-      toast('No se pudo enviar: ' + err.message);
+      if (isRetryable(err) && err.entry && !err.entry.image) {
+        // Sin conexion: a la cola local, se envia solo al reconectar.
+        outboxAdd(err.entry);
+        store(draftKey(), null);
+        renderOutbox();
+        scrollToBottom(false);
+        toast('Sin conexión: el mensaje se enviará al reconectar', 'warn');
+      } else {
+        ta.value = text;
+        autoGrow();
+        toast('No se pudo enviar: ' + err.message + (err.entry && err.entry.image && isRetryable(err) ? ' (las imágenes no se guardan sin conexión)' : ''));
+      }
     } finally {
       state.sending = false;
       updateSendState();
@@ -2486,12 +2831,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Notificaciones (solo mientras la app sigue viva en segundo plano).
   state.notify = recall('muse-remote-notify') === '1' && typeof Notification !== 'undefined' && Notification.permission === 'granted';
+  state.pushOn = state.notify && recall('muse-remote-push') === '1';
   syncNotifyBtn();
   $('notifyBtn').addEventListener('click', async () => {
     if (state.notify) {
       state.notify = false;
+      state.pushOn = false;
       store('muse-remote-notify', null);
+      store('muse-remote-push', null);
       syncNotifyBtn();
+      pushUnsubscribe();
+      toast('Notificaciones desactivadas', 'info');
       return;
     }
     if (typeof Notification === 'undefined') { toast('Este navegador no soporta notificaciones (en iOS instala la app en la pantalla de inicio)', 'warn'); return; }
@@ -2501,7 +2851,29 @@ document.addEventListener('DOMContentLoaded', () => {
     state.notify = true;
     store('muse-remote-notify', '1');
     syncNotifyBtn();
-    toast('Te avisaremos de aprobaciones y turnos terminados', 'info');
+    const b = $('notifyBtn');
+    setBusy(b, true);
+    try { state.pushOn = await pushSubscribe(true); } catch { state.pushOn = false; }
+    finally { setBusy(b, false); syncNotifyBtn(); }
+    store('muse-remote-push', state.pushOn ? '1' : null);
+    toast(state.pushOn
+      ? 'Avisos activados, también con la app cerrada'
+      : 'Avisos activados mientras la app siga abierta (push no disponible aquí)', 'info');
+  });
+  // Abrir la sesion de una notificacion tocada con la app ya abierta.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (e) => {
+      const d = e.data || {};
+      if (d.type === 'open-session' && d.sessionId && state.token && d.sessionId !== state.sessionId) openSession(d.sessionId);
+    });
+  }
+  // Visor de imagenes
+  const viewer = $('viewer');
+  $('viewerClose').addEventListener('click', () => closeDialog(viewer));
+  viewer.addEventListener('click', (e) => { if (e.target !== $('viewerClose')) closeDialog(viewer); });
+  viewer.addEventListener('cancel', (e) => { e.preventDefault(); closeDialog(viewer); });
+  viewer.addEventListener('close', () => {
+    if (!document.querySelector('dialog[open]')) document.body.classList.remove('modal-open');
   });
 
   // Sugerencias del chat vacio: rellenan el composer (no envian).
@@ -2573,6 +2945,7 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('offline', () => { setConn(false); setBanner('Sin conexión de red'); });
   window.addEventListener('online', () => {
     setBanner(null);
+    if (state.sessionId) setTimeout(() => flushOutbox(false), 800);
     if (state.sessionId && !state.pollMode) connectEvents();
     else if (state.token) setConn(true);
   });
@@ -2645,13 +3018,16 @@ async function boot() {
   const sessions = await loadSessions();
   if (!state.token) return; // token invalido -> ya en login
   // Retomar ultima sesion abierta (persistencia en este dispositivo).
-  const last = recall('muse-remote-session');
+  const last = state.openOnBoot || recall('muse-remote-session');
+  state.openOnBoot = null;
   if (last && sessions.some((s) => s.sessionId === last) && !state.sessionId) {
     openSession(last, null, sessions.find((s) => s.sessionId === last));
   }
+  // Renovar la suscripcion push (el navegador puede rotarla).
+  if (state.pushOn) pushSubscribe(false).then((ok) => { if (!ok) { state.pushOn = false; store('muse-remote-push', null); } }).catch(() => {});
 }
 
 // Exportacion solo para tests node (en navegador `module` no existe).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash };
+  module.exports = { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash, highlight, extractImages, outboxLoad, outboxAdd, outboxRemove, outboxUpdate, outboxFor, isRetryable, urlB64ToUint8 };
 }

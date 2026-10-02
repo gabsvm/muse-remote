@@ -10,7 +10,7 @@ global.localStorage = {
   setItem(k, v) { this._s[k] = String(v); },
   removeItem(k) { delete this._s[k]; },
 };
-const { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash } = require('../public/app.js');
+const { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash, highlight, extractImages, outboxLoad, outboxAdd, outboxRemove, outboxUpdate, outboxFor, isRetryable, urlB64ToUint8 } = require('../public/app.js');
 
 test('parseFrame: evento subscribed simple', () => {
   assert.deepEqual(parseFrame('event: subscribed\ndata: {"a":1}'), { type: 'subscribed', data: '{"a":1}' });
@@ -224,4 +224,58 @@ test('comandos /: sugerencias y parseo', () => {
   assert.deepEqual(parseSlash('/Compactar'), { cmd: 'compactar', arg: '' });
   assert.equal(parseSlash('/review algo'), null); // skill: se envia como texto/skill
   assert.equal(parseSlash('texto normal'), null);
+});
+
+test('highlight: tokens por lenguaje y texto intacto', () => {
+  const src = 'const s = "a\\"b"; // hola\nfoo(1.5, true)';
+  const t = highlight(src, 'js');
+  assert.equal(t.map((x) => x.v).join(''), src, 'reconstruye el texto exacto');
+  const by = (k) => t.filter((x) => x.t === k).map((x) => x.v);
+  assert.deepEqual(by('kw'), ['const']);
+  assert.deepEqual(by('str'), ['"a\\"b"']);
+  assert.deepEqual(by('com'), ['// hola']);
+  assert.deepEqual(by('fn'), ['foo']);
+  assert.deepEqual(by('num'), ['1.5']);
+  assert.deepEqual(by('lit'), ['true']);
+  const py = highlight("def f():\n  return 'x'  # c", 'python');
+  assert.ok(py.some((x) => x.t === 'com' && x.v === '# c'));
+  assert.ok(py.some((x) => x.t === 'kw' && x.v === 'return'));
+  // Lenguaje desconocido: sin comentarios '#' falsos.
+  assert.ok(!highlight('a # b', '').some((x) => x.t === 'com'));
+  assert.ok(highlight('SELECT 1 FROM t', 'sql').filter((x) => x.t === 'kw').length === 2);
+  const big = 'x'.repeat(20001);
+  assert.deepEqual(highlight(big, 'js'), [{ t: 'txt', v: big }]);
+});
+
+test('extractImages: formas habituales, solo data:image', () => {
+  assert.deepEqual(extractImages({ kind: 'userMessage', text: 'hola' }), []);
+  assert.deepEqual(extractImages({ content: [{ type: 'image', base64Data: 'QUJD', mediaType: 'image/png' }] }), ['data:image/png;base64,QUJD']);
+  assert.deepEqual(extractImages({ images: [{ mediaType: 'image/jpeg', data: 'QU\nJD' }] }), ['data:image/jpeg;base64,QUJD']);
+  assert.deepEqual(extractImages({ input: [{ type: 'image', source: { data: 'QUJD', media_type: 'image/webp' } }] }), ['data:image/webp;base64,QUJD']);
+  assert.deepEqual(extractImages({ attachments: [{ type: 'image', url: 'https://evil.example/x.png' }] }), []);
+  assert.deepEqual(extractImages({ attachments: [{ type: 'image', base64Data: '<script>' }] }), []);
+  assert.deepEqual(extractImages({ content: [{ type: 'image', base64Data: 'QUJD', mediaType: 'text/html' }] }), ['data:image/jpeg;base64,QUJD']);
+});
+
+test('outbox: persistencia por sesion sin imagenes', () => {
+  assert.deepEqual(outboxLoad(), []);
+  const a = outboxAdd({ sessionId: 's1', text: 'hola', image: { base64Data: 'x' } });
+  outboxAdd({ sessionId: 's2', text: 'otra' });
+  assert.equal(a.image, undefined);
+  assert.match(a.id, /^ob-/);
+  assert.deepEqual(outboxFor('s1').map((e) => e.text), ['hola']);
+  a.commandId = 'c1';
+  outboxUpdate(a);
+  assert.equal(outboxFor('s1')[0].commandId, 'c1');
+  outboxRemove(a.id);
+  assert.deepEqual(outboxFor('s1'), []);
+  outboxRemove(outboxFor('s2')[0].id);
+  assert.equal(localStorage.getItem('muse-remote-outbox'), null);
+  assert.equal(isRetryable(Object.assign(new Error('x'), { network: true })), true);
+  assert.equal(isRetryable(new Error('rechazado')), false);
+});
+
+test('urlB64ToUint8 decodifica la clave VAPID', () => {
+  const raw = Buffer.from(Array.from({ length: 65 }, (_, i) => i));
+  assert.deepEqual(Array.from(urlB64ToUint8(raw.toString('base64url'))), Array.from(raw));
 });
