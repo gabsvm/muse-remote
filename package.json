@@ -6,7 +6,8 @@
   "engines": { "node": ">=18" },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/push.test.js test/msp.test.js test/api.test.js test/client.test.js test/security.test.js test/image.test.js test/timeout.test.js"
+    "tunnel": "node scripts/tunnel.js",
+    "test": "node --test test/push.test.js test/tunnel.test.js test/msp.test.js test/api.test.js test/client.test.js test/security.test.js test/image.test.js test/timeout.test.js"
   },
   "license": "MIT"
 }
