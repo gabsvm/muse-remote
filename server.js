@@ -318,6 +318,15 @@ function setSecurityHeaders(res) {
   res.setHeader('cross-origin-resource-policy', 'same-origin');
 }
 
+// no-transform: Cloudflare no comprime (comprimir obliga a acumular y el
+// directo llegaba solo al recargar). x-accel-buffering: idem para nginx.
+const SSE_HEADERS = {
+  'content-type': 'text/event-stream; charset=utf-8',
+  'cache-control': 'no-store, no-transform',
+  'content-encoding': 'identity',
+  connection: 'keep-alive',
+  'x-accel-buffering': 'no',
+};
 function sendJson(res, code, obj) {
   const body = JSON.stringify(obj);
   setSecurityHeaders(res);
@@ -477,12 +486,11 @@ async function handle(req, res) {
     if (!authorized(req)) { console.error('[events] 401 token invalido'); return sendJson(res, 401, { ok: false, error: 'unauthorized' }); }
     if (!msp.ready) { console.error('[events] 503 msp no listo'); return sendJson(res, 503, { ok: false, error: 'msp host not ready' }); }
     setSecurityHeaders(res);
-    res.writeHead(200, {
-      'content-type': 'text/event-stream; charset=utf-8',
-      'cache-control': 'no-store',
-      connection: 'keep-alive',
-      'x-accel-buffering': 'no',
-    });
+    res.writeHead(200, SSE_HEADERS);
+    // Sin Nagle y con relleno inicial: proxies/tuneles (Cloudflare) que
+    // acumulan los primeros KB sueltan el stream desde el primer evento.
+    try { res.socket.setNoDelay(true); } catch { /* noop */ }
+    res.write(':' + ' '.repeat(2048) + '\n\n');
     const send = (event, data) => {
       try {
         res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -499,7 +507,7 @@ async function handle(req, res) {
     // Ping nominal (visible para el watchdog del cliente) + comentario de keepalive.
     const keep = setInterval(() => {
       try { res.write('event: ping\ndata: {}\n\n: ping\n\n'); } catch { /* noop */ }
-    }, 25000);
+    }, 15000);
     if (keep.unref) keep.unref();
     // res 'close' = socket cerrado por el cliente (req 'close' puede
     // dispararse al terminar de leer la peticion en Node moderno).
@@ -548,5 +556,5 @@ module.exports = {
   ALLOWED_METHODS, RPC_BODY_LIMIT, MAX_IMAGE_BASE64_CHARS, CSP,
   DEFAULT_MSP_TIMEOUT, SESSION_LIST_TIMEOUT, METHOD_TIMEOUTS, timeoutForMethod,
   META_ENV_KEY, assertNoMetaApiKey, childEnvWithoutMetaKey,
-  authorized, setSecurityHeaders, imagePartTooLarge, push,
+  authorized, setSecurityHeaders, imagePartTooLarge, push, SSE_HEADERS,
 };

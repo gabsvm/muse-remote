@@ -8,7 +8,7 @@ const fs = require('node:fs');
 const {
   server, HOST, loadOrCreateToken,
   ALLOWED_METHODS, RPC_BODY_LIMIT, MAX_IMAGE_BASE64_CHARS, CSP,
-  META_ENV_KEY, assertNoMetaApiKey, childEnvWithoutMetaKey,
+  META_ENV_KEY, assertNoMetaApiKey, childEnvWithoutMetaKey, SSE_HEADERS,
 } = require('../server.js');
 
 let base;
@@ -192,4 +192,11 @@ test('(7) index.html sin scripts inline (compatible con CSP script-src self)', (
   assert.ok(scripts.length >= 2);
   for (const s of scripts) assert.match(s, /\bsrc="\//, 'script inline: ' + s);
   assert.ok(!/\son[a-z]+="/i.test(html), 'handlers inline en index.html');
+});
+
+test('(7) SSE sin compresion ni buffering en proxies/tuneles', () => {
+  assert.match(SSE_HEADERS['cache-control'], /no-transform/);
+  assert.equal(SSE_HEADERS['content-encoding'], 'identity');
+  assert.equal(SSE_HEADERS['x-accel-buffering'], 'no');
+  assert.match(SSE_HEADERS['content-type'], /text\/event-stream/);
 });

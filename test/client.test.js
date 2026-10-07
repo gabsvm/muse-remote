@@ -10,7 +10,7 @@ global.localStorage = {
   setItem(k, v) { this._s[k] = String(v); },
   removeItem(k) { delete this._s[k]; },
 };
-const { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash, highlight, extractImages, outboxLoad, outboxAdd, outboxRemove, outboxUpdate, outboxFor, isRetryable, urlB64ToUint8, describeBadResponse } = require('../public/app.js');
+const { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, findUsageBlocks, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash, highlight, extractImages, outboxLoad, outboxAdd, outboxRemove, outboxUpdate, outboxFor, isRetryable, urlB64ToUint8, describeBadResponse } = require('../public/app.js');
 
 test('parseFrame: evento subscribed simple', () => {
   assert.deepEqual(parseFrame('event: subscribed\ndata: {"a":1}'), { type: 'subscribed', data: '{"a":1}' });
@@ -287,4 +287,16 @@ test('describeBadResponse: mensajes accionables para tunel y Cloudflare Access',
   assert.match(describeBadResponse({ status: 530 }), /no está activo/);
   assert.match(describeBadResponse({ status: 403 }), /403/);
   assert.match(describeBadResponse({ status: 500 }), /HTTP 500/);
+});
+
+test('findUsageBlocks: formas distintas de usage/read', () => {
+  const a = findUsageBlocks({ usage: { window: { usedPercent: 34, resetsAtMs: 5 }, weekly: { usedPercent: 78 } } });
+  assert.deepEqual(a.map((x) => [x.label, x.block.usedPercent]), [['Ventana', 34], ['Semanal', 78]]);
+  const b = findUsageBlocks({ limits: [{ name: 'five_hour', utilization: 0.42, resetsAt: '2026-10-07T15:00:00Z' }, { name: 'seven_day', percent_used: '12.5' }] });
+  assert.deepEqual(b.map((x) => [x.label, x.block.usedPercent]), [['Ventana', 42], ['Semanal', 12.5]]);
+  assert.equal(b[0].block.resetsAtMs, Date.parse('2026-10-07T15:00:00Z'));
+  const c = findUsageBlocks({ quota: { used: 30, limit: 120 } });
+  assert.deepEqual(c.map((x) => [x.label, x.block.usedPercent]), [['Quota', 25]]);
+  assert.deepEqual(findUsageBlocks({ usage: null }), []);
+  assert.deepEqual(findUsageBlocks(null), []);
 });

@@ -1920,14 +1920,14 @@ function enterPollMode(reason) {
   esGen++;
   clearTimeout(state.esRetry);
   if (state.es) { try { state.es.close(); } catch {} state.es = null; }
-  clearInterval(state.pollTimer);
+  clearTimeout(state.pollTimer);
   state.pollTimer = null;
   const first = !state.pollMode;
   state.pollMode = true;
   setConnState('waiting');
   setConnDetail('poll: ' + (reason || 'sin live tail'));
   netinfo('Modo poll: ' + (reason || 'sin directo en vivo'));
-  if (first) toast('Sesión sin directo en vivo — se actualiza cada 10 s', 'info');
+  if (first) toast('Sin directo en vivo — actualizando cada pocos segundos', 'info');
   const sid = state.sessionId;
   const tick = async () => {
     if (!state.sessionId || state.sessionId !== sid || !state.pollMode) return;
@@ -1955,9 +1955,17 @@ function enterPollMode(reason) {
   };
   state.pollTick = tick;
   tick();
-  state.pollTimer = setInterval(tick, 10000);
+  // 3 s mientras trabaja (se ve avanzar el turno), 10 s en reposo.
+  const loop = () => {
+    state.pollTimer = setTimeout(async () => {
+      await tick();
+      if (state.pollMode && state.sessionId === sid) loop();
+    }, state.running || pendingCount() ? 3000 : 10000);
+  };
+  loop();
 }
 function exitPollMode() {
+  clearTimeout(state.pollTimer);
   clearInterval(state.pollTimer);
   state.pollTimer = null;
   state.pollTick = null;
@@ -2071,6 +2079,7 @@ function connectEvents() {
       } catch {}
       return;
     }
+    state.lastViewEventAt = Date.now();
     applyViewEvent(type, d.params || d);
   };
   const failure = (reason, status) => {
@@ -2322,6 +2331,25 @@ async function sendPrompt(text) {
   } catch {}
   // Un turno nuevo puede materializar la vista en vivo: reintentar salir de poll.
   if (state.pollMode) connectEvents();
+  else watchDelivery(state.sessionId, Date.now());
+}
+// Red de seguridad: si tras enviar no llega ningun evento por el directo
+// (proxy/tunel que lo retiene), se lee la sesion y, si habia novedades que
+// el directo no trajo, se pasa a modo poll rapido.
+function watchDelivery(sid, sentAt) {
+  clearTimeout(state.deliveryTimer);
+  state.deliveryTimer = setTimeout(async () => {
+    if (state.sessionId !== sid || state.pollMode) return;
+    if ((state.lastViewEventAt || 0) > sentAt) return; // el directo funciona
+    try {
+      const res = await rpc('session/read', { sessionId: sid });
+      if (state.sessionId !== sid || state.pollMode || (state.lastViewEventAt || 0) > sentAt) return;
+      const stick = isNearBottom();
+      const added = renderHistory(res.history) || 0;
+      afterRender(stick, added);
+      if (added) enterPollMode('el directo no entrega eventos (proxy o túnel)');
+    } catch { /* se reintenta con el siguiente envio */ }
+  }, 6000);
 }
 function attachImage(file) {
   if (!file || !String(file.type || '').startsWith('image/')) { toast('Solo se pueden adjuntar imágenes', 'warn'); return; }
@@ -2985,14 +3013,59 @@ function showLogin() {
   show('loginView', { focus: false });
   setConn(false);
 }
+// Busca bloques de uso en la respuesta de usage/read sea cual sea su forma:
+// cualquier objeto con un porcentaje (usedPercent, percentUsed, utilization…).
+const USAGE_LABELS = { window: 'Ventana', session: 'Ventana', fiveHour: 'Ventana', five_hour: 'Ventana', hourly: 'Ventana', weekly: 'Semanal', week: 'Semanal', sevenDay: 'Semanal', seven_day: 'Semanal', monthly: 'Mensual', daily: 'Diario' };
+function normUsageBlock(o) {
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return null;
+  let pct = o.usedPercent ?? o.percentUsed ?? o.used_percent ?? o.percent_used ?? o.percentage ?? o.percent;
+  if (pct === undefined && typeof o.utilization === 'number') pct = o.utilization <= 1 ? o.utilization * 100 : o.utilization;
+  if (pct === undefined && typeof o.used === 'number' && typeof o.limit === 'number' && o.limit > 0) pct = (o.used / o.limit) * 100;
+  if (typeof pct === 'string' && pct.trim() !== '' && !Number.isNaN(Number(pct))) pct = Number(pct);
+  if (typeof pct !== 'number' || !Number.isFinite(pct)) return null;
+  let resetsAtMs = o.resetsAtMs ?? o.resetAtMs ?? o.resets_at_ms;
+  const iso = o.resetsAt ?? o.resetAt ?? o.resets_at ?? o.reset_at;
+  if (resetsAtMs === undefined && iso !== undefined) {
+    const t = typeof iso === 'number' ? (iso < 1e12 ? iso * 1000 : iso) : Date.parse(iso);
+    if (Number.isFinite(t)) resetsAtMs = t;
+  }
+  return { usedPercent: Math.round(pct * 10) / 10, resetsAtMs };
+}
+function findUsageBlocks(u) {
+  const out = [];
+  const seen = new Set();
+  const walk = (o, key, depth) => {
+    if (!o || typeof o !== 'object' || depth > 5 || seen.has(o)) return;
+    seen.add(o);
+    const b = normUsageBlock(o);
+    if (b) {
+      const k = String(o.name || o.label || o.kind || o.type || key || '');
+      const label = USAGE_LABELS[k] || USAGE_LABELS[k.replace(/[-\s]/g, '_')] || (k ? k.charAt(0).toUpperCase() + k.slice(1) : 'Uso');
+      out.push({ block: b, label });
+      return;
+    }
+    if (Array.isArray(o)) o.forEach((v, i) => walk(v, key + (o.length > 1 ? ' ' + (i + 1) : ''), depth + 1));
+    else for (const [k, v] of Object.entries(o)) walk(v, k, depth + 1);
+  };
+  walk(u, '', 0);
+  return out.slice(0, 4);
+}
 function renderUsage(u) {
   const el = $('usageLine');
   el.innerHTML = '';
-  const blocks = [
-    [u && u.usage && u.usage.window, 'Ventana'],
-    [u && u.usage && u.usage.weekly, 'Semanal'],
-  ].filter(([b, l]) => usageLine(b, l));
-  if (!blocks.length) { el.textContent = 'sin datos'; return; }
+  const blocks = findUsageBlocks(u).map((x) => [x.block, x.label]);
+  if (!blocks.length) {
+    // Sin porcentajes reconocibles: mostrar lo que llego para poder ajustarlo.
+    const det = document.createElement('details');
+    const sum = document.createElement('summary');
+    sum.textContent = 'sin datos de porcentaje · ver respuesta';
+    const pre = document.createElement('pre');
+    pre.className = 'usage-raw';
+    pre.textContent = JSON.stringify(u, null, 2).slice(0, 4000);
+    det.append(sum, pre);
+    el.append(det);
+    return;
+  }
   for (const [b, label] of blocks) {
     const line = usageLine(b, label);
     const used = Number(b.usedPercent) || 0;
@@ -3050,5 +3123,5 @@ async function boot() {
 
 // Exportacion solo para tests node (en navegador `module` no existe).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash, highlight, extractImages, outboxLoad, outboxAdd, outboxRemove, outboxUpdate, outboxFor, isRetryable, urlB64ToUint8, describeBadResponse };
+  module.exports = { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, findUsageBlocks, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash, highlight, extractImages, outboxLoad, outboxAdd, outboxRemove, outboxUpdate, outboxFor, isRetryable, urlB64ToUint8, describeBadResponse };
 }
