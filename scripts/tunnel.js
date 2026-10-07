@@ -47,7 +47,9 @@ function parseArgs(argv, env = process.env) {
 
 // Argumentos para cloudflared segun el modo.
 function cloudflaredArgs(o) {
-  const origin = `http://localhost:${o.port}`;
+  // 127.0.0.1 y no localhost: en Windows localhost puede resolver a ::1 y el
+  // backend solo escucha en IPv4 (cloudflared devolveria 502).
+  const origin = `http://127.0.0.1:${o.port}`;
   if (o.name) return ['tunnel', '--no-autoupdate', 'run', '--url', origin, o.name];
   const args = ['tunnel', '--no-autoupdate', '--url', origin];
   for (const m of o.mails) args.push('--allowed-mail', m);

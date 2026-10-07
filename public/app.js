@@ -61,8 +61,10 @@ function friendlyError(msg) {
 }
 async function api(path, opts) {
   let r;
-  try { r = await fetch(path, opts); }
+  try { r = await fetch(path, Object.assign({ redirect: 'manual' }, opts)); }
   catch { throw Object.assign(new Error('sin conexión con el backend'), { network: true }); }
+  if (r.type === 'opaqueredirect') throw new Error(describeBadResponse(r));
+  if (r.status === 502 || r.status === 504 || r.status === 530) throw Object.assign(new Error(describeBadResponse(r)), { network: true });
   if (r.status === 401) {
     onUnauthorized();
     throw new Error('token incorrecto o caducado');
@@ -229,10 +231,27 @@ function ask(opts) {
 }
 
 // ---- login ----
+// Diagnostico legible cuando /api/* no responde como el backend (tunel,
+// proxy o Cloudflare Access de por medio).
+function describeBadResponse(r) {
+  if (!r) return 'sin conexión con el backend (red o túnel caído)';
+  if (r.type === 'opaqueredirect' || (r.status >= 300 && r.status < 400)) {
+    return 'Cloudflare pide volver a verificar tu correo: recarga la página e inicia sesión de nuevo';
+  }
+  if (r.status === 502 || r.status === 504) return `el túnel no llega al backend (HTTP ${r.status}): ¿sigue arrancado npm run tunnel en el PC?`;
+  if (r.status === 530 || r.status === 1033) return 'el túnel de Cloudflare no está activo: vuelve a lanzar npm run tunnel';
+  if (r.status === 403) return 'acceso denegado por Cloudflare (HTTP 403): revisa el correo autorizado';
+  return `el backend respondió HTTP ${r.status}`;
+}
 async function tryLogin(token) {
   let r;
-  try { r = await fetch('/api/health'); } catch { throw new Error('backend no disponible'); }
-  if (!r.ok) throw new Error('backend no disponible');
+  try { r = await fetch('/api/health', { redirect: 'manual', cache: 'no-store' }); }
+  catch { throw new Error(describeBadResponse(null)); }
+  if (!r.ok) throw new Error(describeBadResponse(r));
+  const ct = String(r.headers.get('content-type') || '');
+  if (!ct.includes('application/json')) {
+    throw new Error('la respuesta no viene del backend (¿página de login de Cloudflare?): recarga la página');
+  }
   // health es publica; validar token con una llamada barata
   let t;
   try {
@@ -241,8 +260,9 @@ async function tryLogin(token) {
       headers: { 'content-type': 'application/json', authorization: 'Bearer ' + token },
       body: JSON.stringify({ method: 'model/list', params: {} }),
     });
-  } catch { throw new Error('backend no disponible'); }
+  } catch { throw new Error(describeBadResponse(null)); }
   if (t.status === 401) throw new Error('Token incorrecto');
+  if (t.type === 'opaqueredirect' || t.status === 502 || t.status === 504 || t.status === 530) throw new Error(describeBadResponse(t));
   let j = null;
   try { j = await t.json(); } catch {}
   if (!j) throw new Error('respuesta inválida del backend');
@@ -1973,6 +1993,7 @@ function streamEvents(url, myGen, handlers, extraHeaders) {
       // cabeceras); nunca en el query string.
       r = await fetch(url, {
         signal: ctrl.signal,
+        redirect: 'manual',
         headers: Object.assign({ Accept: 'text/event-stream' }, extraHeaders || {}),
       });
     } catch (e) {
@@ -3029,5 +3050,5 @@ async function boot() {
 
 // Exportacion solo para tests node (en navegador `module` no existe).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash, highlight, extractImages, outboxLoad, outboxAdd, outboxRemove, outboxUpdate, outboxFor, isRetryable, urlB64ToUint8 };
+  module.exports = { parseFrame, sessMeta, fmtDate, fmtRel, isEmptySession, sortSessions, sessTitle, turnos, usageLine, loadHidden, saveHidden, isHidden, CLIENT_MAX_IMAGE_DIM, CLIENT_MAX_IMAGE_BASE64_CHARS, CLIENT_MAX_RPC_BYTES, imageBase64TooLarge, streamEvents, filterSessions, splitFences, parseInline, friendlyError, wsName, parseArgs, toolView, diffStats, looksLikeDiff, fmtElapsed, slashMatches, parseSlash, highlight, extractImages, outboxLoad, outboxAdd, outboxRemove, outboxUpdate, outboxFor, isRetryable, urlB64ToUint8, describeBadResponse };
 }

@@ -7,21 +7,21 @@ const { parseArgs, cloudflaredArgs, findTunnelUrl, hintFor } = require('../scrip
 test('quick tunnel protegido: --allowed-mail por cada correo', () => {
   const o = parseArgs(['--mail', 'a@b.com', '--mail', '*@empresa.com'], {});
   assert.deepEqual(o.mails, ['a@b.com', '*@empresa.com']);
-  assert.deepEqual(cloudflaredArgs(o), ['tunnel', '--no-autoupdate', '--url', 'http://localhost:8787', '--allowed-mail', 'a@b.com', '--allowed-mail', '*@empresa.com']);
+  assert.deepEqual(cloudflaredArgs(o), ['tunnel', '--no-autoupdate', '--url', 'http://127.0.0.1:8787', '--allowed-mail', 'a@b.com', '--allowed-mail', '*@empresa.com']);
 });
 
 test('correos y puerto por entorno, sin duplicados', () => {
   const o = parseArgs(['--mail', 'a@b.com'], { MUSE_REMOTE_ALLOWED_MAIL: 'a@b.com, c@d.org', MUSE_REMOTE_PORT: '9000' });
   assert.deepEqual(o.mails, ['a@b.com', 'c@d.org']);
   assert.equal(o.port, 9000);
-  assert.ok(cloudflaredArgs(o).includes('http://localhost:9000'));
+  assert.ok(cloudflaredArgs(o).includes('http://127.0.0.1:9000'));
 });
 
 test('sin correo exige --public o --name (no expone sin querer)', () => {
   assert.throws(() => parseArgs([], {}), /--mail/);
   assert.equal(parseArgs(['--public'], {}).public, true);
   const n = parseArgs(['--name', 'muse', '--hostname', 'muse.ej.com'], {});
-  assert.deepEqual(cloudflaredArgs(n), ['tunnel', '--no-autoupdate', 'run', '--url', 'http://localhost:8787', 'muse']);
+  assert.deepEqual(cloudflaredArgs(n), ['tunnel', '--no-autoupdate', 'run', '--url', 'http://127.0.0.1:8787', 'muse']);
 });
 
 test('valida correos, puerto y opciones', () => {

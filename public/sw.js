@@ -2,7 +2,7 @@
 // Red primero (con revalidacion no-cache del servidor) y cache como respaldo
 // offline: antes era cache-first y la PWA podia quedarse con un app.js viejo
 // hasta que se cambiaba la version del SW.
-const CACHE = 'muse-remote-v20';
+const CACHE = 'muse-remote-v21';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/theme.js', '/manifest.webmanifest', '/icon.svg'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
