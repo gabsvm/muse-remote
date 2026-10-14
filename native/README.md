@@ -17,7 +17,7 @@ Requisitos: Android Studio reciente con SDK 37, JDK 21, Gradle 9.3+.
 En la carpeta `native`:
 
 ```powershell
-gradle :androidApp:assembleDebug
+.\gradlew.bat :androidApp:assembleDebug
 ```
 
 Puedes ejecutar también `androidApp` desde Android Studio. El APK se genera en `androidApp/build/outputs/apk/debug/`.
@@ -32,7 +32,7 @@ Puedes ejecutar también `androidApp` desde Android Studio. El APK se genera en 
 ## Desktop
 
 ```powershell
-gradle :desktopApp:run
+.\gradlew.bat :desktopApp:run
 ```
 
 Las credenciales Desktop se mantienen solo en memoria por ahora. El escritorio puede conectar a `http://127.0.0.1:8787`, Android exige HTTPS.
