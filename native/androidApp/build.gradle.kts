@@ -12,7 +12,7 @@ kotlin {
 
 android {
     namespace = "io.muse.remote.android"
-    compileSdk = 37
+    compileSdk = 36
     defaultConfig {
         applicationId = "io.muse.remote"
         minSdk = 26

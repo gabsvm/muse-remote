@@ -13,7 +13,7 @@ La aplicación Compose habla con los endpoints existentes del backend, nunca dir
 
 ## Primer arranque Android
 
-Requisitos: Android Studio reciente con SDK 37, JDK 21, Gradle 9.3+.
+Requisitos: Android Studio reciente con SDK 36, JDK 21, Gradle 9.3+.
 En la carpeta `native`:
 
 ```powershell

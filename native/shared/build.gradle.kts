@@ -11,7 +11,7 @@ plugins {
 kotlin {
     android {
         namespace = "io.muse.remote.shared"
-        compileSdk = 37
+        compileSdk = 36
         minSdk = 26
         compilerOptions.jvmTarget = JvmTarget.JVM_17
     }
