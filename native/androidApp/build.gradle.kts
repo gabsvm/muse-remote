@@ -38,4 +38,9 @@ dependencies {
     implementation(project(":shared"))
     implementation(libs.androidx.activity.compose)
     implementation(compose.material3)
+    // MainActivity directly constructs the Ktor engine/client.
+    // Dependencies in :shared are implementation-scoped, so they are not
+    // exposed on :androidApp's Kotlin compile classpath.
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.okhttp)
 }
