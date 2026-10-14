@@ -1,0 +1,41 @@
+name: Muse Remote KMP
+on:
+  push:
+    branches: [feat/kmp-compose-native]
+    paths:
+      - 'native/**'
+      - '.github/workflows/kmp-native.yml'
+  pull_request:
+    paths:
+      - 'native/**'
+      - '.github/workflows/kmp-native.yml'
+jobs:
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Kotlin shared tests and Desktop
+        run: gradle -p native :shared:desktopTest :desktopApp:compileKotlin
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Android SDK 37
+        run: sdkmanager "platforms;android-37" "build-tools;37.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Android debug build
+        run: gradle -p native :androidApp:assembleDebug
