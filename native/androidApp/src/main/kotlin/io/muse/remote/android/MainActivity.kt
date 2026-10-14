@@ -3,6 +3,10 @@ package io.muse.remote.android
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import io.muse.remote.core.Screen
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import io.ktor.client.HttpClient
@@ -28,6 +32,10 @@ class MainActivity : ComponentActivity() {
             }
             DisposableEffect(controller) {
                 onDispose { controller.close() }
+            }
+            val state by controller.state.collectAsState()
+            BackHandler(enabled = state.screen == Screen.Conversation) {
+                controller.backToSessions()
             }
             MuseApp(controller)
         }

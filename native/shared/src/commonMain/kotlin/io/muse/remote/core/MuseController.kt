@@ -312,8 +312,19 @@ class MuseController(
 
     private fun mergeHistory(history: JsonObject?, seq: Long) {
         if (history == null || seq != generation) return
-        history.array("items").orEmpty().forEach {
-            (it as? JsonObject)?.let(ChatItem::from)?.let { item -> upsert(item, seq) }
+        val incoming = history.array("items").orEmpty().mapNotNull {
+            (it as? JsonObject)?.let(ChatItem::from)
+        }
+        if (incoming.isNotEmpty()) mutable.update { previous ->
+            val merged = linkedMapOf<String, ChatItem>()
+            previous.items.forEach { merged[it.id] = it }
+            incoming.forEach { item ->
+                val old = merged[item.id]
+                merged[item.id] = if (old != null && item.text.isBlank())
+                    item.copy(text = old.text) else item
+            }
+            val next = merged.values.toList()
+            if (next == previous.items) previous else previous.copy(items = next)
         }
         history.array("events").orEmpty().forEach {
             val event = it as? JsonObject ?: return@forEach
@@ -353,6 +364,8 @@ class MuseController(
             return
         }
         val p = payload.obj("params") ?: payload
+        val owner = p.string("sessionId")
+        if (owner != null && owner != mutable.value.sessionId) return
         p.string("viewCursor")?.let { cursor -> mutable.update { it.copy(viewCursor = cursor) } }
         when (method) {
             "item/started", "item/updated", "item/completed" -> {

@@ -45,3 +45,8 @@ jobs:
           gradle-version: '9.3.1'
       - name: Android debug build
         run: gradle -p native :androidApp:assembleDebug
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: muse-remote-debug
+          path: native/androidApp/build/outputs/apk/debug/*.apk
