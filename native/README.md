@@ -76,3 +76,25 @@ En el menú ⋮ de cada sesión se puede **Ocultar en este dispositivo** y desde
 la pestaña **Ocultas** restaurar la sesión. Es una función reversible local,
 NO elimina ningún dato en Muse. La versión MSP actual no expone
 `session/delete`, por lo que no se ofrece un botón que simule borrado real.
+
+## Conversación limpia y actividad técnica
+
+El historial MSP se conserva completo en el controlador. La UI presenta
+mensajes reales del usuario y Muse en orden, descarta únicamente burbujas
+vacías o marcadores de texto de suspensión (`...`/`…`) y agrupa
+herramientas, razonamientos y otros eventos técnicos en **una actividad
+contraíble por turno de usuario**, aunque estén intercalados con mensajes
+de progreso del asistente.
+
+Cada actividad permanece contraída por defecto, muestra cantidad de pasos y
+errores, y permite inspeccionar todos los pasos por lotes de 16, con detalles
+individuales opcionales. Los mensajes intermedios, comandos y resultados
+originales no se eliminan del estado MSP ni se modifican en el backend.
+
+El scroll al último mensaje utiliza el número de bloques visuales, no el
+número de llamadas a herramientas sin agrupar. Si el usuario se desplaza
+hacia arriba, se mantiene su posición y aparece «Último mensaje».
+
+Las pruebas compartidas validan 50 herramientas en un único bloque, mensajes
+intercalados, supresión de globos vacíos, separación por turnos y claves
+estables durante streaming. Falta validación visual manual en Android.

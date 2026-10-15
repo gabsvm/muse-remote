@@ -388,6 +388,7 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
     var input by remember(state.sessionId) { mutableStateOf("") }
     val list = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
+    val entries = remember(state.items) { conversationEntries(state.items) }
     // A new conversation should always start at the latest message.
     // Disable following only when the person intentionally drags the list
     // away from its tail. New incoming events must not steal their scroll.
@@ -460,8 +461,10 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
                 }
             }
         }
-        val count = state.items.size + (if (state.working) 1 else 0)
-        LaunchedEffect(state.sessionId, state.items.size, state.items.lastOrNull()?.text?.length,
+        val count = entries.size + (if (state.working) 1 else 0)
+        val latestTextLength = (entries.lastOrNull { it is ConversationEntry.Message }
+            as? ConversationEntry.Message)?.item?.text?.length
+        LaunchedEffect(state.sessionId, entries.size, latestTextLength,
             state.working, followTail) {
             if (followTail && count > 0 && !dragging) {
                 // scrollToItem snaps even for multi-hundred item transcripts.
@@ -476,8 +479,14 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 16.dp),
             ) {
-                items(state.items, key = { it.id }) { item ->
-                    ChatRow(item)
+                items(entries, key = { it.key }) { entry ->
+                    when (entry) {
+                        is ConversationEntry.Message -> ChatRow(entry.item)
+                        is ConversationEntry.Activity -> ActivityRow(
+                            entry, state.working && entry.key ==
+                                entries.lastOrNull { it is ConversationEntry.Activity }?.key,
+                        )
+                    }
                 }
                 if (state.working) item(key = "work-indicator") {
                     Row(Modifier.fillMaxWidth().padding(12.dp),
@@ -556,58 +565,160 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
 }
 
 @Composable
+private fun ActivityRow(activity: ConversationEntry.Activity, isCurrent: Boolean) {
+    var expanded by remember(activity.key) { mutableStateOf(false) }
+    var visibleCount by remember(activity.key) { mutableIntStateOf(8) }
+    var openedStep by remember(activity.key) { mutableStateOf<String?>(null) }
+    val failed = activity.failedCount
+    val count = activity.steps.size
+    val working = isCurrent && activity.steps.any {
+        it.status.lowercase() in setOf("running", "inprogress", "in_progress", "pending")
+    }
+
+    Surface(
+        onClick = { expanded = !expanded },
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.18f)),
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 11.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Terminal, contentDescription = null,
+                    modifier = Modifier.size(17.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Actividad de Muse",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Medium,
+                    )
+                    Text(
+                        buildString {
+                            append(count)
+                            append(if (count == 1) " paso" else " pasos")
+                            if (activity.reasoningCount > 0) {
+                                append(" · ")
+                                append(activity.reasoningCount)
+                                append(" de razonamiento")
+                            }
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (working) {
+                    CircularProgressIndicator(
+                        Modifier.size(14.dp), strokeWidth = 2.dp,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                if (failed > 0) {
+                    Icon(Icons.Default.ErrorOutline, contentDescription = "$failed pasos con errores",
+                        modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(5.dp))
+                    Text("$failed", style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(9.dp))
+                }
+                Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    contentDescription = if (expanded) "Ocultar actividad" else "Mostrar actividad",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (expanded) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.16f))
+                Spacer(Modifier.height(4.dp))
+                val recent = activity.steps.takeLast(visibleCount)
+                if (activity.steps.size > visibleCount) {
+                    TextButton(
+                        onClick = { visibleCount += 16 },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Mostrar ${minOf(16, count - visibleCount)} pasos anteriores")
+                    }
+                }
+                recent.forEach { step ->
+                    val showDetails = openedStep == step.id
+                    val details = (step.detail + "\n" + step.text).trim()
+                    val canExpand = details.isNotBlank() &&
+                        details != "..." && details != "…"
+                    Column {
+                        Row(
+                            Modifier.fillMaxWidth().clickable(enabled = canExpand) {
+                                openedStep = if (showDetails) null else step.id
+                            }.padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val failedStep = step.status.lowercase() in
+                                setOf("failed", "error", "rejected")
+                            Icon(
+                                if (failedStep) Icons.Default.ErrorOutline else
+                                    if (step.status == "completed") Icons.Default.CheckCircleOutline
+                                    else Icons.Default.RadioButtonUnchecked,
+                                contentDescription = null,
+                                modifier = Modifier.size(15.dp),
+                                tint = if (failedStep) MaterialTheme.colorScheme.error
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.width(9.dp))
+                            Text(
+                                step.toolName.ifBlank {
+                                    when (step.kind) {
+                                        "reasoning" -> "Razonamiento"
+                                        "userShell" -> "Comando"
+                                        "subagent" -> "Subagente"
+                                        "workflow" -> "Flujo de trabajo"
+                                        "toolCall" -> "Herramienta"
+                                        else -> "Paso de Muse"
+                                    }
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            if (canExpand) Icon(
+                                if (showDetails) Icons.Default.ExpandLess else Icons.Default.ChevronRight,
+                                contentDescription = if (showDetails) "Ocultar detalle" else "Ver detalle",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (showDetails && canExpand) {
+                            Text(
+                                details,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, bottom = 10.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ChatRow(item: ChatItem) {
     val user = item.kind == "userMessage"
-    val technical = item.kind in setOf("reasoning", "toolCall", "userShell", "subagent", "workflow")
-    var expanded by remember(item.id) { mutableStateOf(false) }
     Column(
         Modifier.fillMaxWidth(),
         horizontalAlignment = if (user) Alignment.End else Alignment.Start,
     ) {
-        if (technical) {
-            Surface(
-                onClick = { expanded = !expanded },
-                color = MaterialTheme.colorScheme.surfaceVariant,
-                shape = RoundedCornerShape(16.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Terminal, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(10.dp))
-                        Text(item.toolName.ifBlank {
-                            when (item.kind) {
-                                "reasoning" -> "Razonamiento"
-                                "subagent" -> "Subagente"
-                                "workflow" -> "Workflow"
-                                else -> "Herramienta"
-                            }
-                        }, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
-                        if (item.status.isNotBlank()) Text(item.status,
-                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.width(6.dp))
-                        Icon(if (expanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore, null)
-                    }
-                    if (expanded) {
-                        Spacer(Modifier.height(12.dp))
-                        Text((item.detail + "\n" + item.text).trim().ifBlank { "Sin detalles adicionales." },
-                            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
-                    }
-                }
-            }
-        } else {
-            Surface(
-                color = if (user) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
-                contentColor = if (user) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                shape = RoundedCornerShape(20.dp),
-                modifier = Modifier.fillMaxWidth(if (user) 0.9f else 1f),
-            ) {
-                Column(Modifier.padding(horizontal = 16.dp, vertical = 13.dp)) {
-                    Text(if (user) "Tú" else "Muse", style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.height(6.dp))
-                    Text(item.text.ifBlank { "…" }, style = MaterialTheme.typography.bodyMedium)
-                }
+        Surface(
+            color = if (user) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+            contentColor = if (user) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+            shape = RoundedCornerShape(20.dp),
+            modifier = Modifier.fillMaxWidth(if (user) 0.9f else 1f),
+        ) {
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 13.dp)) {
+                Text(if (user) "Tú" else "Muse",
+                    style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Text(item.text, style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
