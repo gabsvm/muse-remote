@@ -43,4 +43,5 @@ dependencies {
     // exposed on :androidApp's Kotlin compile classpath.
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
+    implementation(libs.google.code.scanner)
 }

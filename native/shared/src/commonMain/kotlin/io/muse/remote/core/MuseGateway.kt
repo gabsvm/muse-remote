@@ -8,17 +8,34 @@ import io.ktor.client.statement.bodyAsText
 import kotlinx.coroutines.flow.collect
 import kotlinx.serialization.json.*
 
-class MuseGateway(private val client: HttpClient) {
+class MuseGateway(
+    private val defaultClient: HttpClient,
+    private val pinnedClientFactory: ((String) -> HttpClient)? = null,
+) {
+    private var client: HttpClient = defaultClient
     private var credentials: ServerCredentials? = null
 
     fun authorize(value: ServerCredentials) {
         value.validate()
+        val next = if (value.pin != null) {
+            (pinnedClientFactory ?: error("Este cliente no permite certificados LAN autofirmados."))
+                .invoke(value.pin.lowercase())
+        } else defaultClient
+        if (client !== defaultClient && client !== next) client.close()
+        client = next
         credentials = value.copy(url = value.base, token = value.token.trim())
     }
 
-    fun signOut() { credentials = null }
+    fun signOut() {
+        credentials = null
+        if (client !== defaultClient) client.close()
+        client = defaultClient
+    }
 
-    fun close() { client.close() }
+    fun close() {
+        if (client !== defaultClient) client.close()
+        defaultClient.close()
+    }
 
     private fun auth(): ServerCredentials =
         credentials ?: error("No se ha conectado el dispositivo.")

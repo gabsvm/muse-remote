@@ -48,6 +48,8 @@ class AndroidCredentialsStore(context: Context) : CredentialsStore {
         val encrypted = cipher.doFinal(value.token.toByteArray(Charsets.UTF_8))
         prefs.edit()
             .putString("url", value.base)
+            .putString("pin", value.pin)
+            .putString("fallback", value.fallbackUrl)
             .putString("token_iv", encode(cipher.iv))
             .putString("token_payload", encode(encrypted))
             .apply()
@@ -60,7 +62,12 @@ class AndroidCredentialsStore(context: Context) : CredentialsStore {
         return try {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, decode(iv)))
-            ServerCredentials(url, String(cipher.doFinal(decode(payload)), Charsets.UTF_8))
+            ServerCredentials(
+                url,
+                String(cipher.doFinal(decode(payload)), Charsets.UTF_8),
+                prefs.getString("pin", null),
+                prefs.getString("fallback", null),
+            )
         } catch (_: Exception) {
             // Key may be invalidated by OS or device changes. Never return corrupt data.
             clear()

@@ -10,6 +10,15 @@ on:
       - 'native/**'
       - '.github/workflows/kmp-native.yml'
 jobs:
+  lan-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: LAN security and pairing tests
+        run: node --test test/lan.test.js
   desktop:
     runs-on: ubuntu-latest
     steps:

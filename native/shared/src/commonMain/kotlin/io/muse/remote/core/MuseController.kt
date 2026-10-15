@@ -15,6 +15,7 @@ import kotlin.time.TimeSource
 class MuseController(
     private val gateway: MuseGateway,
     private val credentials: CredentialsStore,
+    private val discovery: LanDiscovery = EmptyLanDiscovery,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutable = MutableStateFlow(MuseState())
@@ -29,25 +30,53 @@ class MuseController(
     fun bootstrap() {
         if (started) return
         started = true
-        credentials.read()?.let { connect(it.url, it.token) }
+        credentials.read()?.let { connect(it.url, it.token, it.pin, it.fallbackUrl) }
     }
 
-    fun connect(url: String, token: String) {
-        val candidate = ServerCredentials(url.trim(), token.trim())
+    fun connect(url: String, token: String, pin: String? = null, fallbackUrl: String? = null) {
+        val candidate = ServerCredentials(url.trim(), token.trim(), pin?.trim()?.replace(":", ""),
+            fallbackUrl?.trim()?.takeIf { it.isNotBlank() })
+        try { candidate.validate() }
+        catch (e: IllegalArgumentException) {
+            mutable.update { it.copy(loading = false, error = e.message) }
+            return
+        }
         val seq = ++generation
         cancelConversation()
         mutable.update { it.copy(loading = true, error = null, endpoint = candidate.base) }
         scope.launch {
             try {
-                gateway.authorize(candidate)
-                gateway.checkConnection()
+                // Wait briefly for mDNS before falling back to the last remembered IP.
+                if (candidate.pin != null && discovery.services.value.isEmpty()) delay(1300)
+                val lan = discovery.services.value.firstOrNull {
+                    it.fingerprint.equals(candidate.pin, ignoreCase = true)
+                }
+                val candidates = listOfNotNull(lan?.url, candidate.base, candidate.fallbackUrl)
+                    .distinct()
+                var connected: ServerCredentials? = null
+                var lastFailure: Exception? = null
+                for (endpoint in candidates) {
+                    if (seq != generation) return@launch
+                    val usesPin = candidate.pin != null && endpoint != candidate.fallbackUrl
+                    val connection = candidate.copy(url = endpoint, pin = if (usesPin) candidate.pin else null)
+                    try {
+                        gateway.authorize(connection)
+                        gateway.checkConnection()
+                        connected = connection
+                        break
+                    } catch (cancel: CancellationException) {
+                        throw cancel
+                    } catch (e: Exception) {
+                        lastFailure = e
+                    }
+                }
                 if (seq != generation) return@launch
+                val active = connected ?: throw (lastFailure ?: IllegalStateException("PC no disponible"))
                 credentials.save(candidate)
                 mutable.update {
-                    it.copy(
-                        authenticated = true, screen = Screen.Sessions,
-                        loading = false, stream = "PC conectada", error = null,
-                    )
+                    it.copy(authenticated = true, screen = Screen.Sessions, endpoint = active.base,
+                        loading = false, stream = if (active.pin == null) "Conectado por HTTPS" else "LAN segura",
+                        error = null)
                 }
                 refreshSessions()
                 val recent = credentials.recentSession()
@@ -56,11 +85,14 @@ class MuseController(
                 throw cancel
             } catch (t: Exception) {
                 if (seq == generation) mutable.update {
-                    it.copy(loading = false, authenticated = false, error = t.message ?: "Conexión fallida")
+                    it.copy(loading = false, authenticated = false,
+                        error = "No se pudo conectar por LAN ni respaldo: " + (t.message ?: "conexión fallida"))
                 }
             }
         }
     }
+
+    fun reportError(message: String) { mutable.update { it.copy(error = message) } }
 
     fun logout() {
         generation++

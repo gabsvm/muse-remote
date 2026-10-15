@@ -10,7 +10,12 @@ fun JsonObject.string(key: String): String? =
 fun JsonObject.obj(key: String): JsonObject? = get(key) as? JsonObject
 fun JsonObject.array(key: String): JsonArray? = get(key) as? JsonArray
 
-data class ServerCredentials(val url: String, val token: String) {
+data class ServerCredentials(
+    val url: String,
+    val token: String,
+    val pin: String? = null,
+    val fallbackUrl: String? = null,
+) {
     val base: String get() = url.trim().trimEnd('/')
     fun validate() {
         val normalized = base
@@ -18,6 +23,14 @@ data class ServerCredentials(val url: String, val token: String) {
             normalized.startsWith("http://127.0.0.1:") ||
             normalized.startsWith("http://localhost:")) {
             "Usa una dirección HTTPS (Tailscale Serve o un túnel protegido)."
+        }
+        if (pin != null) {
+            require(normalized.startsWith("https://")) { "La conexión LAN debe usar HTTPS." }
+            require(pin.matches(Regex("[0-9a-fA-F]{64}"))) { "Huella TLS SHA-256 inválida." }
+        }
+        if (!fallbackUrl.isNullOrBlank()) {
+            require(fallbackUrl.startsWith("https://") && !fallbackUrl.contains('@') &&
+                !fallbackUrl.contains('#')) { "URL de respaldo Tailscale inválida." }
         }
         require(token.trim().length >= 16) { "El token debe tener al menos 16 caracteres." }
         require(!normalized.contains('@') && !normalized.contains('#')) { "Dirección de servidor inválida." }

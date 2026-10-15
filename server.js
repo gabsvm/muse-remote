@@ -419,13 +419,14 @@ function imagePartTooLarge(params) {
   return false;
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(onRequest);
+function onRequest(req, res) {
   handle(req, res).catch((e) => {
     console.error('[http] error no capturado: ' + String((e && e.message) || e));
     if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'internal error' });
     else { try { res.end(); } catch { /* noop */ } }
   });
-});
+}
 async function handle(req, res) {
   let u;
   try {
@@ -542,6 +543,17 @@ if (require.main === module) {
   } catch (e) {
     console.error(String((e && e.message) || e));
     process.exit(1);
+  }
+  // LAN is opt-in: HTTPS certificate must be provisioned locally; do not
+  // turn the existing HTTP loopback listener into a public HTTP server.
+  if (process.env.MUSE_REMOTE_LAN === '1') {
+    try {
+      require('./lan').startLan(onRequest);
+    } catch (e) {
+      console.error('[LAN] No se pudo activar HTTPS: ' + e.message);
+      console.error('[LAN] Ejecuta powershell -File scripts/setup-lan.ps1 y npm install.');
+      process.exit(1);
+    }
   }
   msp.start();
   server.listen(PORT, HOST, () => {

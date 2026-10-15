@@ -31,7 +31,11 @@ private val Light = Color(0xFFF4F7F3)
 private val Ink = Color(0xFF15261D)
 
 @Composable
-fun MuseApp(controller: MuseController) {
+fun MuseApp(
+    controller: MuseController,
+    discovery: LanDiscovery = EmptyLanDiscovery,
+    scanPair: (() -> Unit)? = null,
+) {
     val state by controller.state.collectAsState()
     val dark = isSystemInDarkTheme()
     val colors = if (dark) darkColorScheme(
@@ -48,7 +52,7 @@ fun MuseApp(controller: MuseController) {
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
                 when (state.screen) {
-                    Screen.Login -> LoginScene(state, controller)
+                    Screen.Login -> LoginScene(state, controller, discovery, scanPair)
                     Screen.Sessions -> SessionScene(state, controller)
                     Screen.Conversation -> ConversationScene(state, controller)
                 }
@@ -58,10 +62,19 @@ fun MuseApp(controller: MuseController) {
 }
 
 @Composable
-private fun LoginScene(state: MuseState, controller: MuseController) {
+private fun LoginScene(
+    state: MuseState,
+    controller: MuseController,
+    discovery: LanDiscovery,
+    scanPair: (() -> Unit)?,
+) {
     var endpoint by remember(state.endpoint) { mutableStateOf(state.endpoint) }
     var token by remember { mutableStateOf("") }
     var showToken by remember { mutableStateOf(false) }
+    var pin by remember { mutableStateOf("") }
+    var fallback by remember { mutableStateOf("") }
+    var advanced by remember { mutableStateOf(false) }
+    val nearby by discovery.services.collectAsState()
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
@@ -82,6 +95,37 @@ private fun LoginScene(state: MuseState, controller: MuseController) {
         SectionCard {
             Text("CONEXIÓN SEGURA", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(16.dp))
+            if (scanPair != null) {
+                FilledTonalButton(
+                    onClick = scanPair, modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Icon(Icons.Default.QrCodeScanner, null, Modifier.size(20.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text("Emparejar con QR de mi PC")
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("Configuración automática y conexión HTTPS verificada",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(14.dp))
+            }
+            if (nearby.isNotEmpty()) {
+                Text("PC encontradas en esta red", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary)
+                nearby.forEach { pc ->
+                    TextButton(onClick = { endpoint = pc.url }, modifier = Modifier.fillMaxWidth()) {
+                        Icon(Icons.Default.Computer, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text(pc.name, maxLines = 1, modifier = Modifier.weight(1f))
+                        Icon(Icons.Default.ChevronRight, null, Modifier.size(17.dp))
+                    }
+                }
+                Text("Para una PC nueva, escanea su QR o introduce su huella TLS.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(12.dp))
+            }
             OutlinedTextField(
                 value = endpoint, onValueChange = { endpoint = it }, modifier = Modifier.fillMaxWidth(),
                 label = { Text("Dirección del servidor") },
@@ -101,10 +145,35 @@ private fun LoginScene(state: MuseState, controller: MuseController) {
                 },
                 singleLine = true,
             )
+            Spacer(Modifier.height(12.dp))
+            TextButton(onClick = { advanced = !advanced }) {
+                Icon(if (advanced) Icons.Default.ExpandLess else Icons.Default.Tune, null)
+                Spacer(Modifier.width(6.dp))
+                Text(if (advanced) "Ocultar opciones de conexión" else "Opciones de conexión segura")
+            }
+            if (advanced) {
+                OutlinedTextField(
+                    value = pin,
+                    onValueChange = { pin = it.replace(":", "").replace(" ", "").take(64) },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Huella SHA-256 LAN (para certificado autofirmado)") },
+                    placeholder = { Text("64 caracteres hexadecimales") },
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(
+                    value = fallback, onValueChange = { fallback = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("URL HTTPS Tailscale de respaldo (opcional)") },
+                    placeholder = { Text("https://pc.tailnet.ts.net") },
+                    singleLine = true,
+                )
+            }
             Spacer(Modifier.height(18.dp))
             Button(
                 enabled = !state.loading && endpoint.isNotBlank() && token.isNotBlank(),
-                onClick = { controller.connect(endpoint, token) },
+                onClick = { controller.connect(endpoint, token, pin.ifBlank { null },
+                    fallback.ifBlank { null }) },
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(16.dp),
             ) {
@@ -118,7 +187,7 @@ private fun LoginScene(state: MuseState, controller: MuseController) {
         }
         Spacer(Modifier.height(16.dp))
         Text(
-            "Muse sigue ejecutándose en tu PC. Usa una URL HTTPS estable y el token que muestra el backend al iniciarse.",
+            "Para conectarte por Wi-Fi utiliza el QR del PC: verifica su certificado antes de enviar el token. Fuera de casa puedes usar HTTPS de Tailscale.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodySmall,
         )

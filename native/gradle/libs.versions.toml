@@ -6,6 +6,7 @@ ktor = "3.5.1"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 activity = "1.13.0"
+code-scanner = "16.1.0"
 
 [libraries]
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
@@ -15,6 +16,7 @@ ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "kto
 kotlinx-coroutines = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activity" }
+google-code-scanner = { module = "com.google.android.gms:play-services-code-scanner", version.ref = "code-scanner" }
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
 
 [plugins]

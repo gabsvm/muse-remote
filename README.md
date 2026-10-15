@@ -5,6 +5,12 @@ subscription del navegador) desde el telefono. No implementa ningun
 cliente de Model API ni usa API keys PAYG: toda la inferencia la ejecuta
 `muse serve` en este PC a traves de su protocolo oficial MSP.
 
+## Cliente Kotlin Multiplatform sin Cloudflare
+
+El nuevo APK puede conectarse por LAN HTTPS con descubrimiento de la PC,
+certificado fijado por QR y respaldo Tailscale Serve. Configuración y
+advertencias de seguridad: [native/LAN.md](native/LAN.md).
+
 ## Arranque
 
 ```powershell

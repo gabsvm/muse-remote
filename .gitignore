@@ -3,3 +3,6 @@ node_modules/
 *.log
 .vapid.json
 .push-subs.json
+.lan.pfx
+.lan.pass
+.lan.fingerprint
