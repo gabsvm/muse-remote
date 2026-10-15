@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { URL } = require('url');
 const { PushStore, pushForMsp } = require('./push');
+const { writeUpload, readUploadBody } = require('./uploads');
 
 // Solo loopback. Nunca 0.0.0.0 ni exposicion publica (el acceso remoto lo
 // proporciona el usuario con Tailscale Serve por fuera de esta app).
@@ -460,6 +461,24 @@ async function handle(req, res) {
     try { push.add(sub); } catch (e) { return sendJson(res, 400, { ok: false, error: e.message }); }
     if (body.test) push.send({ title: 'Muse Remote', body: 'Notificaciones activadas', tag: 'test' }).catch(() => {});
     return sendJson(res, 200, { ok: true });
+  }
+  if (req.method === 'POST' && pathname === '/api/upload') {
+    if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    const contentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (contentType !== 'application/octet-stream')
+      return sendJson(res, 415, { ok: false, error: 'expected binary upload' });
+    let filename;
+    try { filename = decodeURIComponent(String(req.headers['x-muse-filename'] || '')); }
+    catch { return sendJson(res, 400, { ok: false, error: 'invalid filename' }); }
+    try {
+      const payload = await readUploadBody(req);
+      const file = await writeUpload(payload, filename);
+      return sendJson(res, 200, { ok: true, file });
+    } catch (e) {
+      const message = String(e.message || e);
+      const status = /too large|storage limit|empty/.test(message) ? 413 : 400;
+      return sendJson(res, status, { ok: false, error: message });
+    }
   }
   if (req.method === 'POST' && pathname === '/api/rpc') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });

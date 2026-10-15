@@ -47,10 +47,12 @@ fun conversationEntries(items: List<ChatItem>): List<ConversationEntry> {
         when (item.kind) {
             "userMessage" -> {
                 current = null
-                if (item.text.isNotBlank()) draft.add(DraftEntry.Message(item))
+                if (item.text.isNotBlank() || item.hasImage)
+                    draft.add(DraftEntry.Message(item))
             }
             "agentMessage", "assistantMessage", "message" -> {
-                if (meaningfulText(item.text)) draft.add(DraftEntry.Message(item))
+                if (meaningfulText(item.text) || item.hasImage)
+                    draft.add(DraftEntry.Message(item))
             }
             else -> {
                 // Keep unfamiliar MSP kinds in inspectable activity rather

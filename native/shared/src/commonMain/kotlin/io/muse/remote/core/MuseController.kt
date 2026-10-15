@@ -161,7 +161,8 @@ class MuseController(
                 sessionTitle = known?.title ?: "Sesión ${id.take(8)}",
                 workspace = known?.workspace.orEmpty(),
                 items = emptyList(), approvals = emptyList(), questions = emptyList(),
-                loading = true, sessionReady = false, working = false, sending = false,
+                loading = true, sessionReady = false, sessionBusyElsewhere = false,
+                working = false, sending = false,
                 turnId = null, viewCursor = null,
                 stream = "Solicitando reanudación a Muse…", error = null,
             )
@@ -210,7 +211,7 @@ class MuseController(
                 val session = result.obj("session")
                 mutable.update {
                     it.copy(
-                        loading = false, sessionReady = true,
+                        loading = false, sessionReady = true, sessionBusyElsewhere = false,
                         sessionTitle = session?.string("name")?.takeIf(String::isNotBlank)
                             ?: it.sessionTitle,
                         workspace = session?.string("workspaceRoot") ?: it.workspace,
@@ -236,16 +237,20 @@ class MuseController(
                 previewJob.join()
                 if (seq != generation) return@launch
                 val snapshot = preview
+                val isOccupied = resumeError.message.orEmpty()
+                    .contains("already in use", ignoreCase = true)
                 if (snapshot != null) {
                     mergeHistory(snapshot.obj("history"), seq)
                     mutable.update {
                         it.copy(
                             loading = false, sessionReady = false,
+                            sessionBusyElsewhere = isOccupied,
                             sessionTitle = snapshot.obj("session")?.string("name")
                                 ?.takeIf(String::isNotBlank) ?: it.sessionTitle,
-                            stream = "Solo lectura",
-                            error = "Muse no permitió reanudar: ${resumeError.message}. " +
-                                "Historial recuperado; pulsa Reintentar para habilitar mensajes."
+                            stream = if (isOccupied) "Abierta en Terminal" else "Solo lectura",
+                            error = if (isOccupied) null else
+                                "Muse no permitió reanudar: ${resumeError.message}. " +
+                                    "Historial recuperado; pulsa Reintentar para habilitar mensajes."
                         )
                     }
                 } else {
@@ -270,25 +275,30 @@ class MuseController(
         mutable.update {
             it.copy(screen = Screen.Sessions, sessionId = null, items = emptyList(),
                 approvals = emptyList(), questions = emptyList(), working = false,
-                sessionReady = false, loading = false, sending = false,
+                sessionReady = false, sessionBusyElsewhere = false,
+                loading = false, sending = false,
                 turnId = null, viewCursor = null, stream = "PC conectada", error = null)
         }
         refreshSessions()
     }
 
-    fun send(text: String) {
+    fun send(text: String, attachment: ComposerAttachment? = null) {
         val content = text.trim()
         val sid = mutable.value.sessionId ?: return
-        if (content.isBlank() || mutable.value.sending || !mutable.value.sessionReady) return
+        if ((content.isBlank() && attachment == null) || mutable.value.sending ||
+            !mutable.value.sessionReady) return
         val seq = generation
         mutable.update { it.copy(sending = true, error = null) }
         scope.launch {
             try {
+                // Documents are staged on the user's PC before their local
+                // filesystem path is passed in a text part to Muse.
+                val file = (attachment as? ComposerAttachment.Document)?.let { gateway.upload(it) }
+                if (seq != generation) return@launch
                 val id = gateway.commandId()
                 if (seq != generation) return@launch
-                gateway.send(sid, content, id)
+                gateway.send(sid, content, id, attachment as? ComposerAttachment.Photo, file)
                 if (seq == generation) mutable.update { it.copy(sending = false, working = true) }
-                // Reconcile immediately; a proxy may buffer the SSE despite a 200 response.
                 delay(1500)
                 if (seq == generation) syncOnce(sid, seq)
             } catch (cancel: CancellationException) {
@@ -296,7 +306,8 @@ class MuseController(
             } catch (t: Exception) {
                 if (seq == generation) mutable.update {
                     it.copy(sending = false,
-                        error = "No se confirmó el envío: ${t.message}. Comprueba el historial antes de reintentar.")
+                        error = "No se confirmó el envío: ${t.message}. " +
+                            "Conserva el adjunto y comprueba el historial antes de reintentar.")
                 }
             }
         }

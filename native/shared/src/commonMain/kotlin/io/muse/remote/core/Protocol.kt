@@ -98,6 +98,7 @@ data class ChatItem(
     val status: String,
     val toolName: String,
     val detail: String,
+    val hasImage: Boolean = false,
 ) {
     companion object {
         fun from(raw: JsonObject): ChatItem? {
@@ -107,6 +108,13 @@ data class ChatItem(
             }.orEmpty()
             val args = raw.obj("args")
             val argsString = raw.string("args")
+            val hasImage = listOf("images", "attachments", "content", "input", "parts").any {
+                field -> raw.array(field)?.any { element ->
+                    val part = element as? JsonObject
+                    part?.string("type") == "image" ||
+                        part?.string("mediaType")?.startsWith("image/") == true
+                } == true
+            }
             return ChatItem(
                 id = id,
                 kind = raw.string("kind") ?: "message",
@@ -115,6 +123,7 @@ data class ChatItem(
                 status = raw.string("status").orEmpty(),
                 toolName = raw.string("toolName").orEmpty(),
                 detail = (args?.toString() ?: argsString).orEmpty().take(2000),
+                hasImage = hasImage,
             )
         }
     }

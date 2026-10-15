@@ -98,3 +98,42 @@ hacia arriba, se mantiene su posición y aparece «Último mensaje».
 Las pruebas compartidas validan 50 herramientas en un único bloque, mensajes
 intercalados, supresión de globos vacíos, separación por turnos y claves
 estables durante streaming. Falta validación visual manual en Android.
+
+## Adjuntar imágenes y documentos en Android
+
+El botón **+** del compositor nativo abre el selector de fotos/imágenes o
+el selector de archivos de Android. Solo se adjunta un elemento a la vez
+en esta versión inicial.
+
+- **Imagen:** Android decodifica, reduce a máximo 1568 px por lado,
+  aplana transparencia sobre blanco y comprime a JPEG de forma local.
+  `turn/start.input` incluye una parte MSP `image` con base64 y dimensiones
+  reales. Límite del puente: 4 MiB base64. Se muestra miniatura previa.
+- **Archivo** (PDF, código, ZIP, documentos y otros): Android lee como
+  máximo 10 MiB, autentica una transferencia binaria `POST /api/upload`
+  al puente Node en la PC y obtiene una ruta **local**. Muse recibe una
+  referencia textual a esa ruta en `turn/start`. El MSP actual NO tiene
+  un tipo de entrada general `file`: la capacidad real de abrir/interpretar
+  cada formato depende de las herramientas disponibles de Muse en Windows.
+- El servidor guarda los archivos en `.muse-uploads` (ignorado por Git y
+  fuera de `public`), con nombre sanitizado, identificador aleatorio y
+  límites por archivo (10 MiB) y bandeja (256 MiB). No permite rutas
+  arbitrarias ni hace públicos los archivos. Su limpieza se realiza
+  manualmente cuando ya no se necesiten.
+- El mensaje y el adjunto permanecen en el compositor si falla la
+  transferencia o si no se confirma el envío.
+- Solo disponible para sesiones reanudadas por el cliente nativo. Una
+  sesión abierta en Terminal sigue en modo lectura y no acepta envíos
+  simultáneos; ciérrala allí y reintenta su reanudación.
+
+**Necesario:** actualizar y reiniciar también `node server.js` en la PC
+para habilitar `/api/upload`. Las fotos mediante MSP no necesitan el
+endpoint nuevo.
+
+### Enlaces con la sesión abierta en Terminal
+
+El error MSP `session is already in use` significa que Terminal posee la
+sesión. La app recupera el historial mediante `session/read`, etiqueta
+la sesión como **Abierta en Terminal** y mantiene el compositor bloqueado,
+sin lanzar un diálogo alarmante. Al liberar la sesión en Terminal puedes
+pulsar **Reintentar conexión** en Android. No se fuerza un takeover.

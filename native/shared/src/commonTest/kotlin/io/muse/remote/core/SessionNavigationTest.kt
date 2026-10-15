@@ -30,6 +30,8 @@ class SessionNavigationTest {
                 """{"ok":true,"result":{"sessions":[{"sessionId":"s1","name":"Sesión original"}]}}"""
             method == "session/resume" && resumeFails -> 502 to
                 """{"ok":false,"error":"No se pudo reanudar"}"""
+            method == "session/resume" && request.url.parameters["occupied"] == "1" -> 502 to
+                """{"ok":false,"error":"session s1 is already in use"}"""
             method == "session/resume" -> 200 to
                 """{"ok":true,"result":{"session":{"sessionId":"s1","name":"Sesión original","status":"idle"},"history":{"items":[{"itemId":"i1","kind":"userMessage","text":"Hola"}]}}}"""
             method == "session/read" -> 200 to
@@ -117,6 +119,32 @@ class SessionNavigationTest {
         } finally {
             controller.close()
         }
+    }
+
+    @Test fun sessionBusyInTerminalIsReadOnlyWithoutErrorDialog() = runBlocking {
+        val engine = MockEngine { req ->
+            val (code, payload) = respondFor(req, resumeFails = false)
+            val occupied = (req.body as? TextContent)?.text
+                ?.contains("session/resume") == true
+            respond(
+                if (occupied) """{"ok":false,"error":"session s1 is already in use"}"""
+                else payload,
+                status = if (occupied) HttpStatusCode.BadGateway else HttpStatusCode.fromValue(code),
+                headers = headersOf(HttpHeaders.ContentType, "application/json")
+            )
+        }
+        val controller = MuseController(MuseGateway(HttpClient(engine)), MemoryCredentialsStore())
+        try {
+            controller.connect("https://example.com", "0123456789abcdef")
+            awaitCondition { controller.state.value.authenticated }
+            controller.openSession("s1")
+            awaitCondition { !controller.state.value.loading }
+            assertFalse(controller.state.value.sessionReady)
+            assertTrue(controller.state.value.sessionBusyElsewhere)
+            assertEquals("Abierta en Terminal", controller.state.value.stream)
+            assertNull(controller.state.value.error)
+            assertEquals("Hola", controller.state.value.items.first().text)
+        } finally { controller.close() }
     }
 
 }

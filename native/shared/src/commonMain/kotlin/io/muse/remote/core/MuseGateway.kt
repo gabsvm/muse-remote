@@ -117,13 +117,65 @@ class MuseGateway(
             ?: error("Muse no devolvió la nueva sesión.")
     }
 
-    suspend fun send(sessionId: String, message: String, commandId: String) {
+    data class UploadedDocument(val name: String, val path: String, val size: Int)
+
+    suspend fun upload(attachment: ComposerAttachment.Document): UploadedDocument {
+        require(attachment.content.isNotEmpty() && attachment.content.size <= 10 * 1024 * 1024) {
+            "El archivo debe tener entre 1 byte y 10 MiB."
+        }
+        val c = auth()
+        val response = client.post(c.base + "/api/upload") {
+            header(HttpHeaders.Authorization, "Bearer ${c.token}")
+            header("X-Muse-Filename", attachment.name.encodeURLParameter())
+            header("X-Muse-Mime", attachment.mimeType)
+            contentType(ContentType.Application.OctetStream)
+            setBody(attachment.content)
+        }
+        val body = requireSuccess(response.status.value, response.bodyAsText())
+        val file = body.obj("file") ?: error("El servidor no confirmó el adjunto.")
+        return UploadedDocument(
+            name = file.string("name") ?: attachment.name,
+            path = file.string("path") ?: error("El servidor no devolvió la ruta del archivo."),
+            size = file.string("size")?.toIntOrNull() ?: attachment.content.size,
+        )
+    }
+
+    suspend fun send(
+        sessionId: String,
+        message: String,
+        commandId: String,
+        photo: ComposerAttachment.Photo? = null,
+        document: UploadedDocument? = null,
+    ) {
+        require(photo == null || (photo.base64Data.length <= 4 * 1024 * 1024 &&
+            photo.width in 1..1568 && photo.height in 1..1568)) {
+            "Imagen demasiado grande."
+        }
+        val text = if (document == null) message else buildString {
+            append(message)
+            if (isNotBlank()) append("\n\n")
+            append("Archivo adjunto desde Muse Remote, almacenado en esta PC: ")
+            append(document.name)
+            append("\nRuta local del archivo: ")
+            append(document.path)
+            append("\nUsa esta ruta si necesitas leer el archivo.")
+        }
         rpc("turn/start", buildJsonObject {
             put("commandId", commandId)
             put("sessionId", sessionId)
             put("ifBusy", "queue")
             putJsonArray("input") {
-                add(buildJsonObject { put("type", "text"); put("text", message) })
+                if (text.isNotBlank()) add(buildJsonObject {
+                    put("type", "text")
+                    put("text", text)
+                })
+                if (photo != null) add(buildJsonObject {
+                    put("type", "image")
+                    put("base64Data", photo.base64Data)
+                    put("mediaType", "image/jpeg")
+                    put("width", photo.width)
+                    put("height", photo.height)
+                })
             }
         })
     }

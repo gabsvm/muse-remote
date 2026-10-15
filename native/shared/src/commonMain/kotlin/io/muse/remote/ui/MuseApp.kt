@@ -450,8 +450,12 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
             }
         } else if (!state.sessionReady) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("Esta sesión todavía no está activa", fontWeight = FontWeight.SemiBold)
-                Text("Puedes leer el historial si está disponible. Para enviar mensajes, reanúdala.",
+                Text(if (state.sessionBusyElsewhere) "Abierta en Terminal"
+                    else "Esta sesión todavía no está activa",
+                    fontWeight = FontWeight.SemiBold)
+                Text(if (state.sessionBusyElsewhere)
+                    "Muse está utilizando esta conversación en la PC. Puedes leerla aquí. Para enviar mensajes desde el móvil, ciérrala en Terminal y pulsa Reintentar."
+                    else "Puedes leer el historial si está disponible. Para enviar mensajes, reanúdala.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 TextButton(onClick = { state.sessionId?.let(controller::openSession) }) {
@@ -718,7 +722,15 @@ private fun ChatRow(item: ChatItem) {
                 Text(if (user) "Tú" else "Muse",
                     style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(6.dp))
-                Text(item.text, style = MaterialTheme.typography.bodyMedium)
+                if (item.text.isNotBlank()) Text(item.text, style = MaterialTheme.typography.bodyMedium)
+                if (item.hasImage) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Image, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Imagen adjunta", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
             }
         }
     }

@@ -12,3 +12,6 @@ node_modules/
 *.jks
 *.keystore
 *.dpapi
+
+# Local, authenticated document inbox; never served as static assets
+.muse-uploads/

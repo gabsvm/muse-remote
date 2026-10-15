@@ -19,7 +19,7 @@ jobs:
         with:
           node-version: '22'
       - name: LAN security and pairing tests
-        run: node --test test/lan.test.js
+        run: node --test test/lan.test.js test/upload.test.js
   desktop:
     runs-on: ubuntu-latest
     steps:

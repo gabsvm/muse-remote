@@ -6,6 +6,16 @@ import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import io.muse.remote.ui.PickedAttachment
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import io.muse.remote.core.Screen
@@ -50,7 +60,33 @@ class MainActivity : ComponentActivity() {
             BackHandler(enabled = state.screen == Screen.Conversation) {
                 controller.backToSessions()
             }
-            MuseApp(controller, discovery) {
+            val pickScope = rememberCoroutineScope()
+            var deliverAttachment by remember {
+                mutableStateOf<((PickedAttachment) -> Unit)?>(null)
+            }
+            fun onSelected(uri: Uri?, photo: Boolean) {
+                if (uri == null) return
+                val callback = deliverAttachment ?: return
+                pickScope.launch {
+                    try {
+                        val result = withContext(Dispatchers.IO) {
+                            if (photo) AndroidAttachmentReader.readPhoto(applicationContext, uri)
+                            else AndroidAttachmentReader.readDocument(applicationContext, uri)
+                        }
+                        callback(result)
+                    } catch (e: Exception) {
+                        controller.reportError(e.message ?: "No se pudo adjuntar el archivo.")
+                    }
+                }
+            }
+            val photoPicker = rememberLauncherForActivityResult(
+                ActivityResultContracts.PickVisualMedia()
+            ) { uri -> onSelected(uri, true) }
+            val filePicker = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri -> onSelected(uri, false) }
+
+            MuseApp(controller, discovery, scanPair = {
                 GmsBarcodeScanning.getClient(this@MainActivity).startScan()
                     .addOnSuccessListener { barcode ->
                         try {
@@ -66,7 +102,13 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     .addOnFailureListener { e -> controller.reportError("Escáner no disponible: ${e.message}") }
-            }
+            }, pickImage = { callback ->
+                deliverAttachment = callback
+                photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            }, pickDocument = { callback ->
+                deliverAttachment = callback
+                filePicker.launch(arrayOf("*/*"))
+            })
         }
     }
 }
