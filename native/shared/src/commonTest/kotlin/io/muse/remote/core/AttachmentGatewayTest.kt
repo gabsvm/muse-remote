@@ -79,5 +79,6 @@ class AttachmentGatewayTest {
                     "application/zip", ByteArray(10 * 1024 * 1024 + 1)))
             }
         } finally { gateway.close() }
+        Unit // JUnit4 requires Unit/void, not the captured exception.
     }
 }
