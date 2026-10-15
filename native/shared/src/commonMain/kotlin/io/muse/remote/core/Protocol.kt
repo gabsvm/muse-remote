@@ -186,6 +186,24 @@ data class PromptQuestion(
     }
 }
 
+/** Attachment draft transmitted only on explicit user send. */
+sealed interface ComposerAttachment {
+    val name: String
+
+    data class Photo(
+        override val name: String,
+        val base64Data: String,
+        val width: Int,
+        val height: Int,
+    ) : ComposerAttachment
+
+    data class Document(
+        override val name: String,
+        val mimeType: String,
+        val content: ByteArray,
+    ) : ComposerAttachment
+}
+
 enum class Screen { Login, Sessions, Conversation }
 
 data class MuseState(
@@ -194,6 +212,7 @@ data class MuseState(
     val authenticated: Boolean = false,
     val hiddenSessionIds: Set<String> = emptySet(),
     val sessionReady: Boolean = false,
+    val sessionBusyElsewhere: Boolean = false,
     val loading: Boolean = false,
     val sending: Boolean = false,
     val sessions: List<SessionSummary> = emptyList(),
