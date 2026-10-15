@@ -41,6 +41,7 @@ dependencies {
     // MainActivity directly constructs the Ktor engine/client.
     // Dependencies in :shared are implementation-scoped, so they are not
     // exposed on :androidApp's Kotlin compile classpath.
+    implementation(libs.kotlinx.coroutines)
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)
     implementation(libs.google.code.scanner)
