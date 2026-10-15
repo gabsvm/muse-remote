@@ -58,3 +58,15 @@ Esta es la **primera vertical funcional**, no la migración completa ni una vers
 - Añadir entry point iOS mediante Xcode en macOS; la biblioteca ya declara objetivos iOS.
 
 No publicar este APK como versión final hasta cerrar estas pruebas.
+
+## Sesiones antiguas y organización local
+
+Al tocar una conversación, la app abre su pantalla inmediatamente y muestra
+el progreso de `session/resume`. Las conversaciones grandes pueden tardar.
+Si Muse rechaza la reanudación, la app intenta mostrar el historial mediante
+`session/read`, con envío de mensajes deshabilitado y botón **Reintentar**.
+
+En el menú ⋮ de cada sesión se puede **Ocultar en este dispositivo** y desde
+la pestaña **Ocultas** restaurar la sesión. Es una función reversible local,
+NO elimina ningún dato en Muse. La versión MSP actual no expone
+`session/delete`, por lo que no se ofrece un botón que simule borrado real.

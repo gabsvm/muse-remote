@@ -3,6 +3,7 @@ package io.muse.remote.android
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.sse.SSE
+import java.util.concurrent.TimeUnit
 import java.security.MessageDigest
 import java.security.SecureRandom
 import java.security.cert.CertificateException
@@ -39,6 +40,8 @@ internal fun pinnedLanClient(fingerprint: String): HttpClient {
         install(SSE)
         engine {
             config {
+                readTimeout(205, TimeUnit.SECONDS)
+                connectTimeout(15, TimeUnit.SECONDS)
                 sslSocketFactory(tls.socketFactory, trust)
                 // IP addresses may change with DHCP. The exact certificate pin
                 // replaces hostname identity; never use this for unpinned URLs.

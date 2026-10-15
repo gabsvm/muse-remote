@@ -75,6 +75,19 @@ class AndroidCredentialsStore(context: Context) : CredentialsStore {
         }
     }
 
+    override fun hiddenSessionIds(): Set<String> =
+        prefs.getStringSet("hidden_session_ids", emptySet())?.toSet() ?: emptySet()
+
+    override fun hideSession(id: String) {
+        val next = hiddenSessionIds() + id
+        prefs.edit().putStringSet("hidden_session_ids", next).apply()
+    }
+
+    override fun restoreSession(id: String) {
+        val next = hiddenSessionIds() - id
+        prefs.edit().putStringSet("hidden_session_ids", next).apply()
+    }
+
     override fun clear() {
         prefs.edit().clear().apply()
     }

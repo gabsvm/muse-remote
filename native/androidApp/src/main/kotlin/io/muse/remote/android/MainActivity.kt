@@ -9,6 +9,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import io.muse.remote.core.Screen
+import java.util.concurrent.TimeUnit
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import io.ktor.client.HttpClient
@@ -29,6 +30,13 @@ class MainActivity : ComponentActivity() {
                         followRedirects = false
                         expectSuccess = false
                         install(SSE)
+                        engine {
+                            config {
+                                // session/list may take 180 s on a cold Muse host.
+                                readTimeout(205, TimeUnit.SECONDS)
+                                connectTimeout(15, TimeUnit.SECONDS)
+                            }
+                        }
                     }, ::pinnedLanClient),
                     credentials = AndroidCredentialsStore(applicationContext),
                     discovery = discovery,

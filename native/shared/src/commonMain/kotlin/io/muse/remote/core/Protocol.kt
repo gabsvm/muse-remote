@@ -43,16 +43,24 @@ interface CredentialsStore {
     fun clear()
     fun recentSession(): String?
     fun saveRecentSession(id: String?)
+    // A reversible local filter; MSP has no session/delete operation.
+    fun hiddenSessionIds(): Set<String> = emptySet()
+    fun hideSession(id: String) {}
+    fun restoreSession(id: String) {}
 }
 
 class MemoryCredentialsStore : CredentialsStore {
     private var credentials: ServerCredentials? = null
     private var session: String? = null
+    private val hidden = mutableSetOf<String>()
     override fun read() = credentials
     override fun save(value: ServerCredentials) { credentials = value }
     override fun clear() { credentials = null; session = null }
     override fun recentSession() = session
     override fun saveRecentSession(id: String?) { session = id }
+    override fun hiddenSessionIds(): Set<String> = hidden.toSet()
+    override fun hideSession(id: String) { hidden.add(id) }
+    override fun restoreSession(id: String) { hidden.remove(id) }
 }
 
 data class SessionSummary(
@@ -175,6 +183,8 @@ data class MuseState(
     val screen: Screen = Screen.Login,
     val endpoint: String = "",
     val authenticated: Boolean = false,
+    val hiddenSessionIds: Set<String> = emptySet(),
+    val sessionReady: Boolean = false,
     val loading: Boolean = false,
     val sending: Boolean = false,
     val sessions: List<SessionSummary> = emptyList(),

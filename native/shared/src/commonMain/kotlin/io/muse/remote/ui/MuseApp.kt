@@ -200,6 +200,7 @@ private fun LoginScene(
 private fun SessionScene(state: MuseState, controller: MuseController) {
     var search by remember { mutableStateOf("") }
     var createDialog by remember { mutableStateOf(false) }
+    var showHidden by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
@@ -221,7 +222,7 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Tus sesiones", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("${state.sessions.size} conversaciones sincronizadas", style = MaterialTheme.typography.bodySmall,
+                    Text("${state.sessions.count { it.id !in state.hiddenSessionIds }} conversaciones visibles", style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 FilledTonalButton(
@@ -242,10 +243,24 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
             )
-            Spacer(Modifier.height(12.dp))
-            val shown = remember(state.sessions, search) {
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                FilterChip(selected = !showHidden, onClick = { showHidden = false },
+                    label = { Text("Sesiones") })
+                FilterChip(selected = showHidden, onClick = { showHidden = true },
+                    label = { Text("Ocultas (${state.hiddenSessionIds.size})") })
+            }
+            if (showHidden) {
+                Text("Ocultas solo en este dispositivo. Siguen guardadas en Muse.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Spacer(Modifier.height(10.dp))
+            val shown = remember(state.sessions, search, state.hiddenSessionIds, showHidden) {
                 state.sessions.filter {
-                    it.title.contains(search, true) || it.workspace.contains(search, true)
+                    (it.id in state.hiddenSessionIds) == showHidden &&
+                        (it.title.contains(search, true) || it.workspace.contains(search, true))
                 }
             }
             if (shown.isEmpty()) {
@@ -254,16 +269,27 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                         Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(46.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(Modifier.height(14.dp))
-                        Text(if (search.isBlank()) "Todavía no hay sesiones" else "Sin resultados",
+                        Text(if (search.isNotBlank()) "Sin resultados" else if (showHidden)
+                            "No hay sesiones ocultas" else "No hay sesiones visibles",
                             style = MaterialTheme.typography.titleMedium)
-                        Text(if (search.isBlank()) "Crea una sesión para comenzar." else "Prueba con otro término.",
+                        Text(if (search.isNotBlank()) "Prueba con otro término."
+                            else if (showHidden) "Las sesiones que ocultes aparecerán aquí."
+                            else "Crea una sesión o restaura una sesión oculta.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else {
                 LazyColumn(contentPadding = PaddingValues(bottom = 26.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(shown, key = { it.id }) { session ->
-                        SessionRow(session) { controller.openSession(session.id) }
+                        SessionRow(
+                            session = session,
+                            hidden = showHidden,
+                            onClick = { controller.openSession(session.id) },
+                            onHideOrRestore = {
+                                if (showHidden) controller.restoreSession(session.id)
+                                else controller.hideSession(session.id)
+                            },
+                        )
                     }
                 }
             }
@@ -296,8 +322,14 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
 }
 
 @Composable
-private fun SessionRow(session: SessionSummary, onClick: () -> Unit) {
+private fun SessionRow(
+    session: SessionSummary,
+    hidden: Boolean,
+    onClick: () -> Unit,
+    onHideOrRestore: () -> Unit,
+) {
     val isRunning = session.status == "running"
+    var menuExpanded by remember(session.id) { mutableStateOf(false) }
     Surface(
         onClick = onClick, tonalElevation = 1.dp,
         shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface,
@@ -321,7 +353,25 @@ private fun SessionRow(session: SessionSummary, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(4.dp))
+            Box {
+                IconButton(onClick = { menuExpanded = true }) {
+                    Icon(Icons.Default.MoreVert, contentDescription = "Opciones de sesión")
+                }
+                DropdownMenu(expanded = menuExpanded,
+                    onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text(if (hidden) "Restaurar a la lista" else "Ocultar en este dispositivo") },
+                        leadingIcon = {
+                            Icon(if (hidden) Icons.Default.Unarchive else Icons.Default.Archive, null)
+                        },
+                        onClick = {
+                            menuExpanded = false
+                            onHideOrRestore()
+                        },
+                    )
+                }
+            }
             if (isRunning) {
                 CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
             } else Icon(Icons.Default.ChevronRight, null,
@@ -353,6 +403,27 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
             StreamChip(state.stream)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+        if (state.loading && !state.sessionReady) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                Text("Cargando historial y reanudando sesión en la PC…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else if (!state.sessionReady) {
+            Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                Text("Esta sesión todavía no está activa", fontWeight = FontWeight.SemiBold)
+                Text("Puedes leer el historial si está disponible. Para enviar mensajes, reanúdala.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                TextButton(onClick = { state.sessionId?.let(controller::openSession) }) {
+                    Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Reintentar conexión")
+                }
+            }
+        }
         val count = state.items.size + (if (state.working) 1 else 0)
         LaunchedEffect(state.items.size, state.items.lastOrNull()?.text?.length, state.working) {
             val nearBottom = list.layoutInfo.visibleItemsInfo.lastOrNull()?.index
@@ -408,7 +479,7 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
             }
             FilledIconButton(
                 onClick = { val t = input; input = ""; controller.send(t) },
-                enabled = input.isNotBlank() && !state.sending,
+                enabled = state.sessionReady && input.isNotBlank() && !state.sending,
                 modifier = Modifier.size(50.dp), shape = RoundedCornerShape(16.dp),
             ) {
                 if (state.sending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)

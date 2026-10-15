@@ -18,7 +18,9 @@ class MuseController(
     private val discovery: LanDiscovery = EmptyLanDiscovery,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val mutable = MutableStateFlow(MuseState())
+    private val mutable = MutableStateFlow(
+        MuseState(hiddenSessionIds = credentials.hiddenSessionIds())
+    )
     val state: StateFlow<MuseState> = mutable
     private var generation = 0L
     private var streamJob: Job? = null
@@ -99,7 +101,19 @@ class MuseController(
         cancelConversation()
         gateway.signOut()
         credentials.clear()
-        mutable.value = MuseState()
+        mutable.value = MuseState(hiddenSessionIds = credentials.hiddenSessionIds())
+    }
+
+    fun hideSession(id: String) {
+        if (id == mutable.value.sessionId) return
+        credentials.hideSession(id)
+        if (credentials.recentSession() == id) credentials.saveRecentSession(null)
+        mutable.update { it.copy(hiddenSessionIds = credentials.hiddenSessionIds()) }
+    }
+
+    fun restoreSession(id: String) {
+        credentials.restoreSession(id)
+        mutable.update { it.copy(hiddenSessionIds = credentials.hiddenSessionIds()) }
     }
 
     fun refreshSessions() {
@@ -136,25 +150,37 @@ class MuseController(
     }
 
     fun openSession(id: String) {
-        if (!mutable.value.authenticated) return
+        if (!mutable.value.authenticated || id.isBlank()) return
         val seq = ++generation
         cancelConversation()
-        mutable.update { it.copy(loading = true, error = null) }
+        val known = mutable.value.sessions.firstOrNull { it.id == id }
+        // Navigate before starting the network request. Resume may take many
+        // seconds for large histories; a tap must never feel unresponsive.
+        mutable.update {
+            it.copy(
+                screen = Screen.Conversation,
+                sessionId = id,
+                sessionTitle = known?.title ?: "Sesión ${id.take(8)}",
+                workspace = known?.workspace.orEmpty(),
+                items = emptyList(), approvals = emptyList(), questions = emptyList(),
+                loading = true, sessionReady = false, working = false, sending = false,
+                turnId = null, viewCursor = null, stream = "Abriendo sesión…", error = null,
+            )
+        }
         scope.launch {
             try {
-                val result = gateway.resume(id)
+                val result = withTimeoutOrNull(110_000L) { gateway.resume(id) }
+                    ?: error("Tiempo de espera agotado al reanudar (110 s)")
                 if (seq != generation) return@launch
                 val session = result.obj("session")
-                val known = mutable.value.sessions.firstOrNull { it.id == id }
-                val working = session?.string("status") == "running"
                 mutable.update {
                     it.copy(
-                        screen = Screen.Conversation, loading = false,
-                        sessionId = id, sessionTitle = session?.string("name")
-                            ?: known?.title ?: "Sesión ${id.take(8)}",
-                        workspace = session?.string("workspaceRoot") ?: known?.workspace.orEmpty(),
-                        items = emptyList(), approvals = emptyList(), questions = emptyList(),
-                        working = working, turnId = null, stream = "Conectando…",
+                        loading = false, sessionReady = true,
+                        sessionTitle = session?.string("name")?.takeIf(String::isNotBlank)
+                            ?: it.sessionTitle,
+                        workspace = session?.string("workspaceRoot") ?: it.workspace,
+                        working = session?.string("status") == "running",
+                        stream = "Conectando directo…",
                         viewCursor = result.string("viewCursor"), error = null,
                     )
                 }
@@ -165,8 +191,41 @@ class MuseController(
                 refreshPending(id, seq)
             } catch (cancel: CancellationException) {
                 throw cancel
-            } catch (t: Exception) {
-                if (seq == generation) mutable.update { it.copy(loading = false, error = t.message) }
+            } catch (resumeError: Exception) {
+                if (seq != generation) return@launch
+                // Historical sessions can sometimes be readable even when
+                // the MSP host rejects resume. Never enable sending without
+                // a successful session/resume.
+                mutable.update {
+                    it.copy(stream = "Recuperando historial…", sessionReady = false)
+                }
+                try {
+                    val snapshot = withTimeoutOrNull(110_000L) { gateway.read(id) }
+                        ?: error("Tiempo de espera agotado al leer el historial (110 s)")
+                    if (seq != generation) return@launch
+                    val session = snapshot.obj("session")
+                    mergeHistory(snapshot.obj("history"), seq)
+                    mutable.update {
+                        it.copy(
+                            loading = false, sessionReady = false,
+                            sessionTitle = session?.string("name")?.takeIf(String::isNotBlank)
+                                ?: it.sessionTitle,
+                            stream = "Solo lectura",
+                            error = "Muse no permitió reanudar esta sesión: ${resumeError.message}. " +
+                                "Puedes consultar el historial o pulsar Reintentar."
+                        )
+                    }
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (readError: Exception) {
+                    if (seq == generation) mutable.update {
+                        it.copy(
+                            loading = false, sessionReady = false, stream = "No disponible",
+                            error = "No se pudo abrir la sesión. Reanudar: ${resumeError.message}; " +
+                                "leer historial: ${readError.message}. Puedes reintentar."
+                        )
+                    }
+                }
             }
         }
     }
@@ -177,6 +236,7 @@ class MuseController(
         mutable.update {
             it.copy(screen = Screen.Sessions, sessionId = null, items = emptyList(),
                 approvals = emptyList(), questions = emptyList(), working = false,
+                sessionReady = false, loading = false, sending = false,
                 turnId = null, viewCursor = null, stream = "PC conectada", error = null)
         }
         refreshSessions()
@@ -185,7 +245,7 @@ class MuseController(
     fun send(text: String) {
         val content = text.trim()
         val sid = mutable.value.sessionId ?: return
-        if (content.isBlank() || mutable.value.sending) return
+        if (content.isBlank() || mutable.value.sending || !mutable.value.sessionReady) return
         val seq = generation
         mutable.update { it.copy(sending = true, error = null) }
         scope.launch {

@@ -24,6 +24,27 @@ class ProtocolTest {
         ServerCredentials("https://muse.example.com/", "1234567890abcdef").validate()
     }
 
+    @Test fun hiddenSessionsRemainReversibleInMemory() {
+        val store = MemoryCredentialsStore()
+        assertTrue(store.hiddenSessionIds().isEmpty())
+        store.hideSession("s1")
+        store.hideSession("s1")
+        store.hideSession("s2")
+        assertEquals(setOf("s1", "s2"), store.hiddenSessionIds())
+        store.restoreSession("s1")
+        assertEquals(setOf("s2"), store.hiddenSessionIds())
+    }
+
+    @Test fun protocolHasNoSessionDeletionPretence() {
+        // The app must only hide session IDs locally until MSP supports
+        // an authenticated, destructive session deletion method.
+        val store = MemoryCredentialsStore()
+        store.hideSession("existing-session")
+        assertTrue(store.hiddenSessionIds().contains("existing-session"))
+        store.restoreSession("existing-session")
+        assertFalse(store.hiddenSessionIds().contains("existing-session"))
+    }
+
     @Test fun approvalChoicesUseServerIds() {
         val obj = buildJsonObject {
             put("approvalId", "approval-1")
