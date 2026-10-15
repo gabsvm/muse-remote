@@ -94,4 +94,29 @@ class SessionNavigationTest {
             controller.close()
         }
     }
+    @Test fun historyAppearsBeforeSlowResumeCompletes() = runBlocking {
+        val engine = MockEngine { req ->
+            val (code, result) = respondFor(req, resumeFails = false)
+            if ((req.body as? TextContent)?.text?.contains("session/resume") == true)
+                delay(4_500L)
+            respond(result, status = HttpStatusCode.fromValue(code),
+                headers = headersOf(HttpHeaders.ContentType, "application/json"))
+        }
+        val controller = MuseController(
+            MuseGateway(HttpClient(engine)), MemoryCredentialsStore())
+        try {
+            controller.connect("https://example.com", "0123456789abcdef")
+            awaitCondition { controller.state.value.authenticated }
+            controller.openSession("s1")
+            awaitCondition { controller.state.value.items.isNotEmpty() }
+            assertEquals("Hola", controller.state.value.items.single().text)
+            assertFalse(controller.state.value.sessionReady,
+                "Preview must never unlock the composer before resume")
+            awaitCondition { controller.state.value.sessionReady }
+            assertFalse(controller.state.value.loading)
+        } finally {
+            controller.close()
+        }
+    }
+
 }

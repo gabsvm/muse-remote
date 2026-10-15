@@ -23,6 +23,7 @@ class MuseController(
     )
     val state: StateFlow<MuseState> = mutable
     private var generation = 0L
+    private var openJob: Job? = null
     private var streamJob: Job? = null
     private var syncJob: Job? = null
     private var watchdogJob: Job? = null
@@ -154,24 +155,58 @@ class MuseController(
         val seq = ++generation
         cancelConversation()
         val known = mutable.value.sessions.firstOrNull { it.id == id }
-        // Navigate before starting the network request. Resume may take many
-        // seconds for large histories; a tap must never feel unresponsive.
         mutable.update {
             it.copy(
-                screen = Screen.Conversation,
-                sessionId = id,
+                screen = Screen.Conversation, sessionId = id,
                 sessionTitle = known?.title ?: "Sesión ${id.take(8)}",
                 workspace = known?.workspace.orEmpty(),
                 items = emptyList(), approvals = emptyList(), questions = emptyList(),
                 loading = true, sessionReady = false, working = false, sending = false,
-                turnId = null, viewCursor = null, stream = "Abriendo sesión…", error = null,
+                turnId = null, viewCursor = null,
+                stream = "Solicitando reanudación a Muse…", error = null,
             )
         }
-        scope.launch {
+        openJob = scope.launch {
+            // If resume is slow, read a snapshot concurrently and display it.
+            // Reading never unlocks the composer; only resume can do that.
+            var preview: JsonObject? = null
+            var readFailure: String? = null
+            val previewJob = launch {
+                delay(2_500L)
+                if (seq != generation || !mutable.value.loading) return@launch
+                mutable.update { it.copy(stream = "Buscando historial mientras Muse reanuda…") }
+                try {
+                    val snapshot = withTimeoutOrNull(100_000L) { gateway.read(id) }
+                        ?: error("Tiempo de espera agotado al leer el historial (100 s)")
+                    if (seq != generation) return@launch
+                    preview = snapshot
+                    if (!mutable.value.sessionReady) {
+                        mergeHistory(snapshot.obj("history"), seq)
+                        mutable.update {
+                            it.copy(
+                                sessionTitle = snapshot.obj("session")?.string("name")
+                                    ?.takeIf(String::isNotBlank) ?: it.sessionTitle,
+                                stream = "Historial cargado · esperando reanudación…",
+                            )
+                        }
+                    }
+                } catch (cancel: CancellationException) {
+                    throw cancel
+                } catch (e: Exception) {
+                    readFailure = e.message ?: "error desconocido"
+                }
+            }
             try {
-                val result = withTimeoutOrNull(110_000L) { gateway.resume(id) }
-                    ?: error("Tiempo de espera agotado al reanudar (110 s)")
+                val result = withTimeoutOrNull(105_000L) {
+                    gateway.resume(id) { phase ->
+                        if (seq == generation && mutable.value.loading &&
+                            mutable.value.items.isEmpty()) {
+                            mutable.update { it.copy(stream = phase) }
+                        }
+                    }
+                } ?: error("Tiempo de espera agotado al reanudar la sesión (105 s)")
                 if (seq != generation) return@launch
+                previewJob.cancel()
                 val session = result.obj("session")
                 mutable.update {
                     it.copy(
@@ -193,39 +228,38 @@ class MuseController(
                 throw cancel
             } catch (resumeError: Exception) {
                 if (seq != generation) return@launch
-                // Historical sessions can sometimes be readable even when
-                // the MSP host rejects resume. Never enable sending without
-                // a successful session/resume.
                 mutable.update {
-                    it.copy(stream = "Recuperando historial…", sessionReady = false)
+                    it.copy(stream = "Reanudación fallida · comprobando historial…",
+                        sessionReady = false)
                 }
-                try {
-                    val snapshot = withTimeoutOrNull(110_000L) { gateway.read(id) }
-                        ?: error("Tiempo de espera agotado al leer el historial (110 s)")
-                    if (seq != generation) return@launch
-                    val session = snapshot.obj("session")
+                // Parallel read avoids a second serial 110-second wait.
+                previewJob.join()
+                if (seq != generation) return@launch
+                val snapshot = preview
+                if (snapshot != null) {
                     mergeHistory(snapshot.obj("history"), seq)
                     mutable.update {
                         it.copy(
                             loading = false, sessionReady = false,
-                            sessionTitle = session?.string("name")?.takeIf(String::isNotBlank)
-                                ?: it.sessionTitle,
+                            sessionTitle = snapshot.obj("session")?.string("name")
+                                ?.takeIf(String::isNotBlank) ?: it.sessionTitle,
                             stream = "Solo lectura",
-                            error = "Muse no permitió reanudar esta sesión: ${resumeError.message}. " +
-                                "Puedes consultar el historial o pulsar Reintentar."
+                            error = "Muse no permitió reanudar: ${resumeError.message}. " +
+                                "Historial recuperado; pulsa Reintentar para habilitar mensajes."
                         )
                     }
-                } catch (cancel: CancellationException) {
-                    throw cancel
-                } catch (readError: Exception) {
-                    if (seq == generation) mutable.update {
+                } else {
+                    mutable.update {
                         it.copy(
                             loading = false, sessionReady = false, stream = "No disponible",
                             error = "No se pudo abrir la sesión. Reanudar: ${resumeError.message}; " +
-                                "leer historial: ${readError.message}. Puedes reintentar."
+                                "leer historial: ${readFailure ?: "sin respuesta"}. " +
+                                "Pulsa Reintentar o prueba una sesión más reciente."
                         )
                     }
                 }
+            } finally {
+                previewJob.cancel()
             }
         }
     }
@@ -510,8 +544,8 @@ class MuseController(
     }
 
     private fun cancelConversation() {
-        streamJob?.cancel(); syncJob?.cancel(); watchdogJob?.cancel()
-        streamJob = null; syncJob = null; watchdogJob = null
+        openJob?.cancel(); streamJob?.cancel(); syncJob?.cancel(); watchdogJob?.cancel()
+        openJob = null; streamJob = null; syncJob = null; watchdogJob = null
     }
 
     fun close() {

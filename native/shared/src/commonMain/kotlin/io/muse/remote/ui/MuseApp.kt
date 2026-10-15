@@ -22,6 +22,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.muse.remote.core.*
+import kotlinx.coroutines.delay
 
 private val Forest = Color(0xFF16754B)
 private val Mint = Color(0xFF55D797)
@@ -403,13 +404,28 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
             StreamChip(state.stream)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+        var waitingSeconds by remember(state.sessionId) { mutableIntStateOf(0) }
+        LaunchedEffect(state.sessionId, state.loading) {
+            waitingSeconds = 0
+            while (state.loading) {
+                delay(1_000L)
+                waitingSeconds++
+            }
+        }
         if (state.loading && !state.sessionReady) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
-                Text("Cargando historial y reanudando sesión en la PC…",
-                    style = MaterialTheme.typography.bodySmall,
+                Text(state.stream, style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Esperando ${waitingSeconds} s · Muse puede tardar al cargar sesiones antiguas.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (waitingSeconds >= 25) {
+                    Text("Puedes volver a la lista sin perder tus sesiones.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         } else if (!state.sessionReady) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {

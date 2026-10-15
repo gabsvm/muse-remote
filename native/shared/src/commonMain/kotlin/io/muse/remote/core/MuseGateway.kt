@@ -92,11 +92,15 @@ class MuseGateway(
         return results.values.sortedByDescending { it.updatedAt }
     }
 
-    suspend fun resume(sessionId: String): JsonObject =
-        rpc("session/resume", buildJsonObject {
-            put("commandId", commandId())
+    suspend fun resume(sessionId: String, onPhase: (String) -> Unit = {}): JsonObject {
+        onPhase("Solicitando identificador de comando…")
+        val id = commandId()
+        onPhase("Muse está procesando session/resume…")
+        return rpc("session/resume", buildJsonObject {
+            put("commandId", id)
             put("sessionId", sessionId)
         })
+    }
 
     suspend fun read(sessionId: String): JsonObject =
         rpc("session/read", buildJsonObject { put("sessionId", sessionId) })
