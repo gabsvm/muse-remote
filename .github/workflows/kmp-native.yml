@@ -1,5 +1,6 @@
 name: Muse Remote KMP
 on:
+  workflow_dispatch:
   push:
     branches: [feat/kmp-compose-native]
     paths:
@@ -52,10 +53,35 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
+      - name: Prepare stable QA signing key (push only)
+        if: github.event_name != 'pull_request'
+        env:
+          KEY_B64: ${{ secrets.MUSE_QA_KEYSTORE_B64 }}
+          KEY_PASSWORD: ${{ secrets.MUSE_QA_STORE_PASSWORD }}
+        run: |
+          if [ -z "$KEY_B64" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Configura MUSE_QA_KEYSTORE_B64 y MUSE_QA_STORE_PASSWORD en GitHub Secrets para publicar una APK actualizable."
+            echo "::error::Consulta native/QA_SIGNING.md. No se publica otro APK con firma aleatoria."
+            exit 1
+          fi
+          printf "%s" "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/muse-qa.p12"
+          chmod 600 "$RUNNER_TEMP/muse-qa.p12"
+          keytool -list -keystore "$RUNNER_TEMP/muse-qa.p12" -alias museqa -storepass "$KEY_PASSWORD" >/dev/null
+          echo "MUSE_QA_KEYSTORE_PATH=$RUNNER_TEMP/muse-qa.p12" >> "$GITHUB_ENV"
       - name: Android debug build
+        env:
+          MUSE_QA_STORE_PASSWORD: ${{ secrets.MUSE_QA_STORE_PASSWORD }}
         run: gradle -p native :androidApp:assembleDebug
-      - name: Upload debug APK
+      - name: Inspect APK signature (push only)
+        if: github.event_name != 'pull_request'
+        run: |
+          APK="$(find native/androidApp/build/outputs/apk/debug -name '*.apk' -print -quit)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+      - name: Upload stable QA APK (push only)
+        if: github.event_name != 'pull_request'
         uses: actions/upload-artifact@v4
         with:
-          name: muse-remote-debug
+          name: muse-remote-qa-signed
           path: native/androidApp/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

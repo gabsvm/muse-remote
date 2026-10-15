@@ -17,6 +17,12 @@ La aplicación Compose habla con los endpoints existentes del backend, nunca dir
 Consulta [**LAN.md**](LAN.md): configuración segura de Windows, QR,
 detección automática y Tailscale como respaldo.
 
+## APK actualizable y firma estable
+
+Consulta [QA_SIGNING.md](QA_SIGNING.md) para configurar una sola clave
+privada de QA mediante GitHub Secrets. GitHub Actions **no publica** nuevos
+APK firmados con la clave aleatoria del runner.
+
 ## Primer arranque Android
 
 Requisitos: Android Studio reciente con SDK 36, JDK 21, Gradle 9.3+.

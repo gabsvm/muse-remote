@@ -2,6 +2,7 @@ package io.muse.remote.ui
 
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -23,6 +24,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import io.muse.remote.core.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val Forest = Color(0xFF16754B)
 private val Mint = Color(0xFF55D797)
@@ -385,6 +387,24 @@ private fun SessionRow(
 private fun ConversationScene(state: MuseState, controller: MuseController) {
     var input by remember(state.sessionId) { mutableStateOf("") }
     val list = rememberLazyListState()
+    val scrollScope = rememberCoroutineScope()
+    // A new conversation should always start at the latest message.
+    // Disable following only when the person intentionally drags the list
+    // away from its tail. New incoming events must not steal their scroll.
+    var followTail by remember(state.sessionId) { mutableStateOf(true) }
+    val dragging by list.interactionSource.collectIsDraggedAsState()
+    val nearTail by remember(list) {
+        derivedStateOf {
+            val layout = list.layoutInfo
+            layout.totalItemsCount == 0 ||
+                (layout.visibleItemsInfo.lastOrNull()?.index ?: -1) >=
+                    (layout.totalItemsCount - 2).coerceAtLeast(0)
+        }
+    }
+    LaunchedEffect(dragging, nearTail) {
+        if (dragging) followTail = nearTail
+        else if (nearTail) followTail = true
+    }
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -441,25 +461,46 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
             }
         }
         val count = state.items.size + (if (state.working) 1 else 0)
-        LaunchedEffect(state.items.size, state.items.lastOrNull()?.text?.length, state.working) {
-            val nearBottom = list.layoutInfo.visibleItemsInfo.lastOrNull()?.index
-                ?.let { it >= (count - 3).coerceAtLeast(0) } ?: true
-            if (nearBottom && count > 0) list.animateScrollToItem(count - 1)
-        }
-        LazyColumn(
-            state = list, modifier = Modifier.weight(1f).fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 16.dp),
-        ) {
-            items(state.items, key = { it.id }) { item ->
-                ChatRow(item)
+        LaunchedEffect(state.sessionId, state.items.size, state.items.lastOrNull()?.text?.length,
+            state.working, followTail) {
+            if (followTail && count > 0 && !dragging) {
+                // scrollToItem snaps even for multi-hundred item transcripts.
+                // animateScrollToItem from index 0 is too slow and is cancelled
+                // repeatedly by incoming history/streaming updates.
+                list.scrollToItem(count - 1)
             }
-            if (state.working) item(key = "work-indicator") {
-                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                    Spacer(Modifier.width(10.dp))
-                    Text("Muse está trabajando…", style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            LazyColumn(
+                state = list, modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 16.dp),
+            ) {
+                items(state.items, key = { it.id }) { item ->
+                    ChatRow(item)
+                }
+                if (state.working) item(key = "work-indicator") {
+                    Row(Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Muse está trabajando…", style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            if (!nearTail && count > 0) {
+                FilledTonalButton(
+                    onClick = {
+                        followTail = true
+                        scrollScope.launch { list.scrollToItem(count - 1) }
+                    },
+                    modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Icon(Icons.Default.KeyboardArrowDown, contentDescription = null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Último mensaje")
                 }
             }
         }
@@ -494,7 +535,15 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
                 }
             }
             FilledIconButton(
-                onClick = { val t = input; input = ""; controller.send(t) },
+                onClick = {
+                    val t = input
+                    input = ""
+                    followTail = true
+                    controller.send(t)
+                    scrollScope.launch {
+                        if (count > 0) list.scrollToItem(count - 1)
+                    }
+                },
                 enabled = state.sessionReady && input.isNotBlank() && !state.sending,
                 modifier = Modifier.size(50.dp), shape = RoundedCornerShape(16.dp),
             ) {

@@ -1,5 +1,11 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
+// A single QA key lives in GitHub Secrets, never in source control.
+// Without that key local builds use Android's ordinary per-machine debug key.
+val qaKeystorePath = providers.environmentVariable("MUSE_QA_KEYSTORE_PATH").orNull
+val qaStorePassword = providers.environmentVariable("MUSE_QA_STORE_PASSWORD").orNull
+val hasQaSigning = !qaKeystorePath.isNullOrBlank() && !qaStorePassword.isNullOrBlank()
+
 plugins {
     alias(libs.plugins.androidApplication)
     alias(libs.plugins.composeMultiplatform)
@@ -17,14 +23,28 @@ android {
         applicationId = "io.muse.remote"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull
+            ?.toIntOrNull()?.let { it + 1 } ?: 2
+        versionName = "0.1.1-qa"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    signingConfigs {
+        if (hasQaSigning) {
+            create("museQa") {
+                storeFile = file(qaKeystorePath!!)
+                storePassword = qaStorePassword
+                keyAlias = "museqa"
+                keyPassword = qaStorePassword
+            }
+        }
+    }
     buildTypes {
+        getByName("debug") {
+            if (hasQaSigning) signingConfig = signingConfigs.getByName("museQa")
+        }
         release {
             isMinifyEnabled = true
             proguardFiles(

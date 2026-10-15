@@ -6,3 +6,9 @@ node_modules/
 .lan.pfx
 .lan.pass
 .lan.fingerprint
+
+# Never commit private Android signing credentials
+*.p12
+*.jks
+*.keystore
+*.dpapi
