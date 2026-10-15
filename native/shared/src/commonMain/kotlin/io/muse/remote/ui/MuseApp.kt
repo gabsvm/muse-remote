@@ -16,6 +16,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -33,11 +35,20 @@ private val Panel = Color(0xFF18251E)
 private val Light = Color(0xFFF4F7F3)
 private val Ink = Color(0xFF15261D)
 
+/** UI-only thumbnail stays in memory. Bytes are sent only on explicit confirmation. */
+data class PickedAttachment(
+    val data: ComposerAttachment,
+    val preview: ImageBitmap? = null,
+)
+
+
 @Composable
 fun MuseApp(
     controller: MuseController,
     discovery: LanDiscovery = EmptyLanDiscovery,
     scanPair: (() -> Unit)? = null,
+    pickImage: (((PickedAttachment) -> Unit) -> Unit)? = null,
+    pickDocument: (((PickedAttachment) -> Unit) -> Unit)? = null,
 ) {
     val state by controller.state.collectAsState()
     val dark = isSystemInDarkTheme()
@@ -57,7 +68,9 @@ fun MuseApp(
                 when (state.screen) {
                     Screen.Login -> LoginScene(state, controller, discovery, scanPair)
                     Screen.Sessions -> SessionScene(state, controller)
-                    Screen.Conversation -> ConversationScene(state, controller)
+                    Screen.Conversation -> ConversationScene(
+                        state, controller, pickImage, pickDocument,
+                    )
                 }
             }
         }
@@ -384,8 +397,27 @@ private fun SessionRow(
 }
 
 @Composable
-private fun ConversationScene(state: MuseState, controller: MuseController) {
+private fun ConversationScene(
+    state: MuseState,
+    controller: MuseController,
+    pickImage: (((PickedAttachment) -> Unit) -> Unit)?,
+    pickDocument: (((PickedAttachment) -> Unit) -> Unit)?,
+) {
     var input by remember(state.sessionId) { mutableStateOf("") }
+    var attachment by remember(state.sessionId) { mutableStateOf<PickedAttachment?>(null) }
+    var attachmentMenu by remember { mutableStateOf(false) }
+    var pendingSend by remember(state.sessionId) { mutableStateOf(false) }
+    // Discard the draft ONLY after the backend acknowledges turn/start.
+    // On failure, preserve both text and attached bytes for manual retry.
+    LaunchedEffect(state.sending, state.error) {
+        if (pendingSend && !state.sending) {
+            if (state.error == null) {
+                input = ""
+                attachment = null
+            }
+            pendingSend = false
+        }
+    }
     val list = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
     val entries = remember(state.items) { conversationEntries(state.items) }
@@ -529,10 +561,78 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+        if (attachment != null) {
+            val picked = attachment!!
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant,
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Row(
+                    Modifier.padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (picked.preview != null) {
+                        Image(
+                            picked.preview, contentDescription = "Vista previa de la imagen",
+                            modifier = Modifier.size(52.dp),
+                            contentScale = ContentScale.Crop,
+                        )
+                    } else {
+                        Icon(Icons.Default.InsertDriveFile, contentDescription = null)
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(picked.data.name, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.labelLarge)
+                        Text(
+                            if (picked.data is ComposerAttachment.Photo)
+                                "Imagen · se enviará a Muse"
+                            else "Archivo · se copiará de forma segura a tu PC",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    IconButton(onClick = { attachment = null }, enabled = !state.sending) {
+                        Icon(Icons.Default.Close, contentDescription = "Quitar adjunto")
+                    }
+                }
+            }
+        }
         Row(
             Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp),
             verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            if (pickImage != null || pickDocument != null) {
+                Box {
+                    IconButton(onClick = { attachmentMenu = true },
+                        enabled = state.sessionReady && !state.sending) {
+                        Icon(Icons.Default.AddCircleOutline,
+                            contentDescription = "Adjuntar imagen o archivo")
+                    }
+                    DropdownMenu(expanded = attachmentMenu, onDismissRequest = {
+                        attachmentMenu = false
+                    }) {
+                        if (pickImage != null) DropdownMenuItem(
+                            text = { Text("Foto o imagen") },
+                            leadingIcon = { Icon(Icons.Default.Image, null) },
+                            onClick = {
+                                attachmentMenu = false
+                                pickImage { attachment = it }
+                            },
+                        )
+                        if (pickDocument != null) DropdownMenuItem(
+                            text = { Text("Archivo de la PC") },
+                            leadingIcon = { Icon(Icons.Default.AttachFile, null) },
+                            onClick = {
+                                attachmentMenu = false
+                                pickDocument { attachment = it }
+                            },
+                        )
+                    }
+                }
+            }
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
@@ -549,15 +649,15 @@ private fun ConversationScene(state: MuseState, controller: MuseController) {
             }
             FilledIconButton(
                 onClick = {
-                    val t = input
-                    input = ""
                     followTail = true
-                    controller.send(t)
+                    pendingSend = true
+                    controller.send(input, attachment?.data)
                     scrollScope.launch {
                         if (count > 0) list.scrollToItem(count - 1)
                     }
                 },
-                enabled = state.sessionReady && input.isNotBlank() && !state.sending,
+                enabled = state.sessionReady && (input.isNotBlank() || attachment != null) &&
+                    !state.sending,
                 modifier = Modifier.size(50.dp), shape = RoundedCornerShape(16.dp),
             ) {
                 if (state.sending) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
