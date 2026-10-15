@@ -24,6 +24,8 @@ class SessionNavigationTest {
         return when {
             request.url.encodedPath == "/api/health" -> 200 to
                 """{"ok":true,"mspReady":true}"""
+            request.url.encodedPath == "/api/command-id" -> 200 to
+                """{"ok":true,"commandId":"0199aabb-ccdd-7000-8000-010203040506"}"""
             method == "session/list" -> 200 to
                 """{"ok":true,"result":{"sessions":[{"sessionId":"s1","name":"Sesión original"}]}}"""
             method == "session/resume" && resumeFails -> 502 to
@@ -61,7 +63,9 @@ class SessionNavigationTest {
             assertEquals(Screen.Conversation, controller.state.value.screen)
             assertTrue(controller.state.value.loading)
             assertFalse(controller.state.value.sessionReady)
-            awaitCondition { controller.state.value.sessionReady }
+            awaitCondition {
+                controller.state.value.sessionReady && controller.state.value.items.isNotEmpty()
+            }
             assertFalse(controller.state.value.loading)
             assertEquals("Hola", controller.state.value.items.first().text)
         } finally {
