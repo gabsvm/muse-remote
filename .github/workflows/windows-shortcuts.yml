@@ -1,0 +1,42 @@
+name: Windows launchers smoke
+on:
+  push:
+    branches: [feat/kmp-compose-native]
+    paths:
+      - 'scripts/windows/**'
+      - '.github/workflows/windows-shortcuts.yml'
+  pull_request:
+    paths:
+      - 'scripts/windows/**'
+      - '.github/workflows/windows-shortcuts.yml'
+  workflow_dispatch:
+jobs:
+  windows-smoke:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse launcher PowerShell and verify entrypoints
+        shell: pwsh
+        run: |
+          $target = Join-Path $PWD 'scripts/windows/muse-control.ps1'
+          $tokens = $null
+          $errors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $target, [ref]$tokens, [ref]$errors)
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+          foreach ($file in @(
+            '01_Emparejar_LAN.cmd',
+            '02_Ver_estado.cmd',
+            '03_Reiniciar_servidor.cmd',
+            '_servidor-lan.cmd')) {
+            $path = Join-Path 'scripts/windows' $file
+            if (-not (Test-Path $path)) { throw "Falta acceso Windows: $path" }
+          }
+      - name: Smoke test non-mutating status shortcut
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/muse-control.ps1 -Action Status
+          if ($LASTEXITCODE -ne 0) { throw 'No se pudo consultar el estado en Windows.' }

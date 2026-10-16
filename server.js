@@ -438,7 +438,7 @@ async function handle(req, res) {
   const pathname = u.pathname;
 
   if (req.method === 'GET' && pathname === '/api/health') {
-    return sendJson(res, 200, { ok: true, mspReady: msp.ready, serverInfo: msp.serverInfo, version: '0.1.0' });
+    return sendJson(res, 200, { ok: true, mspReady: msp.ready, serverInfo: msp.serverInfo, version: '0.1.0', features: { fileUpload: true } });
   }
   if (req.method === 'GET' && pathname === '/api/command-id') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });

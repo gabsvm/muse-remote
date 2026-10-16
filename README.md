@@ -11,6 +11,13 @@ El nuevo APK puede conectarse por LAN HTTPS con descubrimiento de la PC,
 certificado fijado por QR y respaldo Tailscale Serve. Configuración y
 advertencias de seguridad: [native/LAN.md](native/LAN.md).
 
+## Accesos de doble clic para Windows
+
+Para iniciar o volver a emparejar por LAN, consultar el estado y reiniciar
+el servidor actualizado (incluidos los adjuntos de documentos), utiliza
+[los accesos de `scripts/windows`](scripts/windows/README.md).
+Conservan el token, certificado LAN y Tailscale Serve.
+
 ## Arranque
 
 ```powershell
