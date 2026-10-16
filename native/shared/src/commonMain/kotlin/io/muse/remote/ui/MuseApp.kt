@@ -92,6 +92,19 @@ private fun LoginScene(
     var advanced by remember { mutableStateOf(false) }
     val nearby by discovery.services.collectAsState()
 
+    if (state.restoringConnection) {
+        Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                CircularProgressIndicator()
+                Text("Reconectando con tu PC…", style = MaterialTheme.typography.titleLarge)
+                Text("Utilizando el acceso cifrado que ya tienes guardado",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        return
+    }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.Center,
@@ -111,6 +124,23 @@ private fun LoginScene(
         SectionCard {
             Text("CONEXIÓN SEGURA", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
             Spacer(Modifier.height(16.dp))
+            if (state.savedConnectionAvailable) {
+                FilledTonalButton(
+                    onClick = controller::retrySavedConnection,
+                    enabled = !state.loading,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Icon(Icons.Default.Refresh, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Reconectar con el acceso guardado")
+                }
+                Spacer(Modifier.height(8.dp))
+                Text("El token sigue cifrado en este dispositivo; no hace falta escanear otro QR.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(14.dp))
+            }
             if (scanPair != null) {
                 FilledTonalButton(
                     onClick = scanPair, modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -238,7 +268,10 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Tus sesiones", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    Text("${state.sessions.count { it.id !in state.hiddenSessionIds }} conversaciones visibles", style = MaterialTheme.typography.bodySmall,
+                    Text(if (state.sessionsLoading && !state.sessionsLoaded &&
+                        state.sessionsPageCount == 0) "Sincronizando conversaciones…"
+                        else "${state.sessions.count { it.id !in state.hiddenSessionIds }} conversaciones visibles",
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 FilledTonalButton(
@@ -279,7 +312,35 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                         (it.title.contains(search, true) || it.workspace.contains(search, true))
                 }
             }
-            if (shown.isEmpty()) {
+            if (state.sessionsLoading) {
+                LinearProgressIndicator(Modifier.fillMaxWidth())
+                Spacer(Modifier.height(8.dp))
+                Text(if (state.sessionsPageCount > 0)
+                    "Sincronizando… ${state.sessionsPageCount} páginas recibidas"
+                    else "Consultando a Muse en la PC… Al reiniciar puede tardar unos minutos.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+            }
+            if (state.sessionsError != null) {
+                Text(state.sessionsError, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = controller::refreshSessions) {
+                    Icon(Icons.Default.Refresh, null)
+                    Spacer(Modifier.width(7.dp))
+                    Text("Reintentar listado")
+                }
+            }
+            if (shown.isEmpty() && state.sessionsLoading && !state.sessionsLoaded) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else if (shown.isEmpty() && state.sessionsError != null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No se pudo cargar el historial de Muse.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else if (shown.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(32.dp)) {
                         Icon(Icons.Default.FolderOpen, null, modifier = Modifier.size(46.dp),
@@ -290,7 +351,7 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                             style = MaterialTheme.typography.titleMedium)
                         Text(if (search.isNotBlank()) "Prueba con otro término."
                             else if (showHidden) "Las sesiones que ocultes aparecerán aquí."
-                            else "Crea una sesión o restaura una sesión oculta.",
+                            else "Muse no devolvió sesiones. Compruébalas en la PC o pulsa Actualizar.",
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }

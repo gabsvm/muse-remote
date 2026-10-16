@@ -52,7 +52,7 @@ class AndroidCredentialsStore(context: Context) : CredentialsStore {
             .putString("fallback", value.fallbackUrl)
             .putString("token_iv", encode(cipher.iv))
             .putString("token_payload", encode(encrypted))
-            .apply()
+            .commit().also { check(it) { "No se pudo guardar el emparejamiento cifrado." } }
     }
 
     override fun read(): ServerCredentials? {
@@ -69,8 +69,9 @@ class AndroidCredentialsStore(context: Context) : CredentialsStore {
                 prefs.getString("fallback", null),
             )
         } catch (_: Exception) {
-            // Key may be invalidated by OS or device changes. Never return corrupt data.
-            clear()
+            // Never wipe the encrypted pairing, archived-session preferences
+            // or recent-session state merely because Keystore read failed.
+            // A transient OS failure is not an explicit sign-out.
             null
         }
     }

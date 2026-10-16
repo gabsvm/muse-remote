@@ -18,8 +18,15 @@ class MuseController(
     private val discovery: LanDiscovery = EmptyLanDiscovery,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val savedLoginAtStart = credentials.read()
     private val mutable = MutableStateFlow(
-        MuseState(hiddenSessionIds = credentials.hiddenSessionIds())
+        MuseState(
+            hiddenSessionIds = credentials.hiddenSessionIds(),
+            savedConnectionAvailable = savedLoginAtStart != null,
+            restoringConnection = savedLoginAtStart != null,
+            loading = savedLoginAtStart != null,
+            endpoint = savedLoginAtStart?.base.orEmpty(),
+        )
     )
     val state: StateFlow<MuseState> = mutable
     private var generation = 0L
@@ -28,12 +35,23 @@ class MuseController(
     private var syncJob: Job? = null
     private var watchdogJob: Job? = null
     private var started = false
+    private var listJob: Job? = null
+    private var listSequence = 0L
     private var lastEvent = TimeSource.Monotonic.markNow()
 
     fun bootstrap() {
         if (started) return
         started = true
-        credentials.read()?.let { connect(it.url, it.token, it.pin, it.fallbackUrl) }
+        savedLoginAtStart?.let { connect(it.url, it.token, it.pin, it.fallbackUrl) }
+    }
+
+    fun retrySavedConnection() {
+        val saved = credentials.read() ?: run {
+            mutable.update { it.copy(savedConnectionAvailable = false) }
+            return
+        }
+        mutable.update { it.copy(restoringConnection = true, loading = true, error = null) }
+        connect(saved.url, saved.token, saved.pin, saved.fallbackUrl)
     }
 
     fun connect(url: String, token: String, pin: String? = null, fallbackUrl: String? = null) {
@@ -46,7 +64,11 @@ class MuseController(
         }
         val seq = ++generation
         cancelConversation()
-        mutable.update { it.copy(loading = true, error = null, endpoint = candidate.base) }
+        listJob?.cancel()
+        listSequence++
+        mutable.update { it.copy(loading = true, error = null, endpoint = candidate.base,
+            sessionsLoading = false, sessionsLoaded = false, sessionsError = null,
+            sessions = emptyList(), sessionsPageCount = 0) }
         scope.launch {
             try {
                 // Wait briefly for mDNS before falling back to the last remembered IP.
@@ -78,7 +100,8 @@ class MuseController(
                 credentials.save(candidate)
                 mutable.update {
                     it.copy(authenticated = true, screen = Screen.Sessions, endpoint = active.base,
-                        loading = false, stream = if (active.pin == null) "Conectado por HTTPS" else "LAN segura",
+                        loading = false, restoringConnection = false, savedConnectionAvailable = true,
+                        stream = if (active.pin == null) "Conectado por HTTPS" else "LAN segura",
                         error = null)
                 }
                 refreshSessions()
@@ -88,7 +111,8 @@ class MuseController(
                 throw cancel
             } catch (t: Exception) {
                 if (seq == generation) mutable.update {
-                    it.copy(loading = false, authenticated = false,
+                    it.copy(loading = false, restoringConnection = false, authenticated = false,
+                        savedConnectionAvailable = true,
                         error = "No se pudo conectar por LAN ni respaldo: " + (t.message ?: "conexión fallida"))
                 }
             }
@@ -100,6 +124,8 @@ class MuseController(
     fun logout() {
         generation++
         cancelConversation()
+        listJob?.cancel()
+        listSequence++
         gateway.signOut()
         credentials.clear()
         mutable.value = MuseState(hiddenSessionIds = credentials.hiddenSessionIds())
@@ -119,14 +145,29 @@ class MuseController(
 
     fun refreshSessions() {
         if (!mutable.value.authenticated) return
-        scope.launch {
+        val seq = ++listSequence
+        listJob?.cancel()
+        mutable.update { it.copy(sessionsLoading = true, sessionsError = null,
+            sessionsPageCount = 0) }
+        listJob = scope.launch {
             try {
-                val sessions = gateway.listAllSessions()
-                if (mutable.value.authenticated) mutable.update { it.copy(sessions = sessions) }
-            } catch (cancel: CancellationException) {
-                throw cancel
-            } catch (t: Exception) {
-                mutable.update { it.copy(error = "No se pudieron listar las sesiones: ${t.message}") }
+                val sessions = gateway.listAllSessions { page, partial ->
+                    if (seq == listSequence && mutable.value.authenticated) {
+                        mutable.update { it.copy(sessionsPageCount = page,
+                            sessions = if (partial.isNotEmpty()) partial else it.sessions) }
+                    }
+                }
+                if (seq == listSequence && mutable.value.authenticated) mutable.update {
+                    it.copy(sessions = sessions, sessionsLoading = false,
+                        sessionsLoaded = true, sessionsError = null)
+                }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (t: Exception) {
+                if (seq == listSequence && mutable.value.authenticated) mutable.update {
+                    it.copy(sessionsLoading = false,
+                        sessionsError = "No se pudo recuperar la lista: ${t.message ?: "error de Muse"}. " +
+                            "Pulsa Reintentar; no se borró ninguna conversación.")
+                }
             }
         }
     }

@@ -72,7 +72,10 @@ class MuseGateway(
         return body.obj("result") ?: buildJsonObject {}
     }
 
-    suspend fun listAllSessions(maxPages: Int = 40): List<SessionSummary> {
+    suspend fun listAllSessions(
+        maxPages: Int = 40,
+        onPage: (pageNumber: Int, sessions: List<SessionSummary>) -> Unit = { _, _ -> },
+    ): List<SessionSummary> {
         val results = linkedMapOf<String, SessionSummary>()
         val visited = mutableSetOf<String>()
         var cursor: String? = null
@@ -81,12 +84,15 @@ class MuseGateway(
                 put("limit", 50)
                 cursor?.let { put("cursor", it) }
             })
-            response.array("sessions").orEmpty().forEach { element ->
+            val page = response.array("sessions")
+                ?: error("Muse devolvió session/list sin la lista de sesiones.")
+            page.forEach { element ->
                 val s = (element as? JsonObject)?.let(SessionSummary::from)
                 if (s != null) results[s.id] = s
             }
+            onPage(it + 1, results.values.sortedByDescending { item -> item.updatedAt })
             val next = response.string("nextCursor")
-            if (next.isNullOrEmpty() || !visited.add(next)) return results.values.sortedByDescending { it.updatedAt }
+            if (next.isNullOrEmpty() || !visited.add(next)) return results.values.sortedByDescending { item -> item.updatedAt }
             cursor = next
         }
         return results.values.sortedByDescending { it.updatedAt }
