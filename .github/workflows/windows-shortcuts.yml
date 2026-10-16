@@ -40,3 +40,25 @@ jobs:
         run: |
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/muse-control.ps1 -Action Status
           if ($LASTEXITCODE -ne 0) { throw 'No se pudo consultar el estado en Windows.' }
+      - name: Start actual LAN backend and inspect upload capability
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $processId = $null
+          try {
+            powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows/muse-control.ps1 -Action Restart
+            if ($LASTEXITCODE -ne 0) { throw 'No se pudo iniciar el servidor desde el acceso Windows.' }
+            $health = Invoke-RestMethod 'http://127.0.0.1:8787/api/health' -TimeoutSec 5
+            if ($health.ok -ne $true -or $health.features.fileUpload -ne $true) {
+              throw 'El servidor no informa la nueva capacidad de subir archivos.'
+            }
+            $lan = @(Get-NetTCPConnection -LocalPort 8788 -State Listen -ErrorAction Stop)
+            if ($lan.Count -eq 0) { throw 'No se habilito el puerto HTTPS LAN 8788.' }
+            Write-Host 'Servidor Windows arrancado y uploads listos.'
+          } finally {
+            $serverConns = @(Get-NetTCPConnection -LocalPort 8787 -State Listen -ErrorAction SilentlyContinue)
+            if ($serverConns.Count -gt 0) {
+              $processId = $serverConns[0].OwningProcess
+              & taskkill.exe /PID ([string]$processId) /T /F | Out-Null
+            }
+          }
