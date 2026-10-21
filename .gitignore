@@ -15,3 +15,11 @@ node_modules/
 
 # Local, authenticated document inbox; never served as static assets
 .muse-uploads/
+
+# Environment, local tooling, and other sensitive runtime state
+.env
+.env.*
+!.env.example
+.npmrc
+*.secrets.json
+*.local.json
