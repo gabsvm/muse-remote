@@ -9,7 +9,7 @@ Android **no puede actualizar una instalación firmada con otra clave**.
 ## Solución
 
 Genera una única clave **exclusiva de QA** desde tu PC, guárdala en privado
-y registra **dos secretos** en este repositorio privado:
+y registra **dos secretos** en GitHub Actions del repositorio. Funcionan también en repositorios públicos, pero nunca deben imprimirse ni incluirse en artefactos:
 
 - `MUSE_QA_KEYSTORE_B64`: contenido PKCS#12 codificado en base64
 - `MUSE_QA_STORE_PASSWORD`: contraseña de la clave/almacén
@@ -64,3 +64,5 @@ tendrá la misma firma y conservará el token cifrado y los datos de la app.
 - GitHub Secrets protege los valores de los logs estándar; aun así,
   solo deben tener acceso de escritura personas de confianza y los
   workflows de PRs no reciben secretos de forks.
+
+**Repositorio público:** los workflows, sus logs y los APK subidos como artifacts pueden ser visibles a terceros. La clave privada y la contraseña nunca deben salir de GitHub Secrets ni aparecer en logs o paquetes. No habilites firma QA para pull requests externos.
