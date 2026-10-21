@@ -1,6 +1,8 @@
 // Pruebas HTTP del backend: bind loopback, auth por token, allowlist MSP.
 'use strict';
 const { test, before, after } = require('node:test');
+// Stable test-only token; never read or rewrite the user's .token file.
+process.env.MUSE_REMOTE_TOKEN = 'muse-remote-integration-test-local-only-token';
 const assert = require('node:assert/strict');
 const { server, msp, HOST, loadOrCreateToken } = require('../server.js');
 

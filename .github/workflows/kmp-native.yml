@@ -1,0 +1,87 @@
+name: Muse Remote KMP
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/kmp-compose-native]
+    paths:
+      - 'native/**'
+      - '.github/workflows/kmp-native.yml'
+  pull_request:
+    paths:
+      - 'native/**'
+      - '.github/workflows/kmp-native.yml'
+jobs:
+  lan-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: LAN security and pairing tests
+        run: node --test test/lan.test.js test/upload.test.js
+  desktop:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Kotlin shared tests and Desktop
+        run: gradle -p native :shared:desktopTest :desktopApp:compileKotlin
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Android SDK 36
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+        run: |
+          SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -type f -name sdkmanager | head -n 1)"
+          test -n "$SDKMANAGER"
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
+      - name: Prepare stable QA signing key (push only)
+        if: github.event_name != 'pull_request'
+        env:
+          KEY_B64: ${{ secrets.MUSE_QA_KEYSTORE_B64 }}
+          KEY_PASSWORD: ${{ secrets.MUSE_QA_STORE_PASSWORD }}
+        run: |
+          if [ -z "$KEY_B64" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Configura MUSE_QA_KEYSTORE_B64 y MUSE_QA_STORE_PASSWORD en GitHub Secrets para publicar una APK actualizable."
+            echo "::error::Consulta native/QA_SIGNING.md. No se publica otro APK con firma aleatoria."
+            exit 1
+          fi
+          printf "%s" "$KEY_B64" | base64 --decode > "$RUNNER_TEMP/muse-qa.p12"
+          chmod 600 "$RUNNER_TEMP/muse-qa.p12"
+          keytool -list -keystore "$RUNNER_TEMP/muse-qa.p12" -alias museqa -storepass "$KEY_PASSWORD" >/dev/null
+          echo "MUSE_QA_KEYSTORE_PATH=$RUNNER_TEMP/muse-qa.p12" >> "$GITHUB_ENV"
+      - name: Android debug build
+        env:
+          MUSE_QA_STORE_PASSWORD: ${{ secrets.MUSE_QA_STORE_PASSWORD }}
+        run: gradle -p native :androidApp:assembleDebug
+      - name: Inspect APK signature (push only)
+        if: github.event_name != 'pull_request'
+        run: |
+          APK="$(find native/androidApp/build/outputs/apk/debug -name '*.apk' -print -quit)"
+          test -n "$APK"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
+      - name: Upload stable QA APK (push only)
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: muse-remote-qa-signed
+          path: native/androidApp/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

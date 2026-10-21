@@ -3,3 +3,23 @@ node_modules/
 *.log
 .vapid.json
 .push-subs.json
+.lan.pfx
+.lan.pass
+.lan.fingerprint
+
+# Never commit private Android signing credentials
+*.p12
+*.jks
+*.keystore
+*.dpapi
+
+# Local, authenticated document inbox; never served as static assets
+.muse-uploads/
+
+# Environment, local tooling, and other sensitive runtime state
+.env
+.env.*
+!.env.example
+.npmrc
+*.secrets.json
+*.local.json

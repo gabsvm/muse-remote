@@ -3,6 +3,8 @@
 // (session/start + turn/start con parte `image` contra `muse serve`).
 'use strict';
 const { test, before, after } = require('node:test');
+// The real-host integration suite uses an ephemeral, test-only bearer token.
+process.env.MUSE_REMOTE_TOKEN = 'muse-remote-integration-test-local-only-token';
 const assert = require('node:assert/strict');
 const { server, msp, HOST, loadOrCreateToken, uuidv7, RPC_BODY_LIMIT, MAX_IMAGE_BASE64_CHARS } = require('../server.js');
 

@@ -1,0 +1,35 @@
+name: Node backend and PWA checks
+
+on:
+  pull_request:
+    paths:
+      - '**/*.js'
+      - 'package.json'
+      - '.github/workflows/node-ci.yml'
+  push:
+    branches: [main, feat/kmp-compose-native]
+    paths:
+      - '**/*.js'
+      - 'package.json'
+      - '.github/workflows/node-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install pinned direct dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Credential-free Node unit tests
+        run: npm test

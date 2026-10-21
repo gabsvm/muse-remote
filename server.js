@@ -10,6 +10,7 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 const { URL } = require('url');
 const { PushStore, pushForMsp } = require('./push');
+const { writeUpload, readUploadBody } = require('./uploads');
 
 // Solo loopback. Nunca 0.0.0.0 ni exposicion publica (el acceso remoto lo
 // proporciona el usuario con Tailscale Serve por fuera de esta app).
@@ -419,13 +420,14 @@ function imagePartTooLarge(params) {
   return false;
 }
 
-const server = http.createServer((req, res) => {
+const server = http.createServer(onRequest);
+function onRequest(req, res) {
   handle(req, res).catch((e) => {
     console.error('[http] error no capturado: ' + String((e && e.message) || e));
     if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'internal error' });
     else { try { res.end(); } catch { /* noop */ } }
   });
-});
+}
 async function handle(req, res) {
   let u;
   try {
@@ -436,7 +438,7 @@ async function handle(req, res) {
   const pathname = u.pathname;
 
   if (req.method === 'GET' && pathname === '/api/health') {
-    return sendJson(res, 200, { ok: true, mspReady: msp.ready, serverInfo: msp.serverInfo, version: '0.1.0' });
+    return sendJson(res, 200, { ok: true, mspReady: msp.ready, serverInfo: msp.serverInfo, version: '0.1.0', features: { fileUpload: true } });
   }
   if (req.method === 'GET' && pathname === '/api/command-id') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
@@ -459,6 +461,24 @@ async function handle(req, res) {
     try { push.add(sub); } catch (e) { return sendJson(res, 400, { ok: false, error: e.message }); }
     if (body.test) push.send({ title: 'Muse Remote', body: 'Notificaciones activadas', tag: 'test' }).catch(() => {});
     return sendJson(res, 200, { ok: true });
+  }
+  if (req.method === 'POST' && pathname === '/api/upload') {
+    if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    const contentType = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+    if (contentType !== 'application/octet-stream')
+      return sendJson(res, 415, { ok: false, error: 'expected binary upload' });
+    let filename;
+    try { filename = decodeURIComponent(String(req.headers['x-muse-filename'] || '')); }
+    catch { return sendJson(res, 400, { ok: false, error: 'invalid filename' }); }
+    try {
+      const payload = await readUploadBody(req);
+      const file = await writeUpload(payload, filename);
+      return sendJson(res, 200, { ok: true, file });
+    } catch (e) {
+      const message = String(e.message || e);
+      const status = /too large|storage limit|empty/.test(message) ? 413 : 400;
+      return sendJson(res, status, { ok: false, error: message });
+    }
   }
   if (req.method === 'POST' && pathname === '/api/rpc') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
@@ -542,6 +562,17 @@ if (require.main === module) {
   } catch (e) {
     console.error(String((e && e.message) || e));
     process.exit(1);
+  }
+  // LAN is opt-in: HTTPS certificate must be provisioned locally; do not
+  // turn the existing HTTP loopback listener into a public HTTP server.
+  if (process.env.MUSE_REMOTE_LAN === '1') {
+    try {
+      require('./lan').startLan(onRequest);
+    } catch (e) {
+      console.error('[LAN] No se pudo activar HTTPS: ' + e.message);
+      console.error('[LAN] Ejecuta powershell -File scripts/setup-lan.ps1 y npm install.');
+      process.exit(1);
+    }
   }
   msp.start();
   server.listen(PORT, HOST, () => {
