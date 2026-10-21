@@ -32,6 +32,8 @@ Licensed under [MIT](LICENSE) for original project code. Third-party dependencie
 
 ---
 
+## Cliente Kotlin Multiplatform sin Cloudflare
+
 El nuevo APK puede conectarse por LAN HTTPS con descubrimiento de la PC,
 certificado fijado por QR y respaldo Tailscale Serve. Configuración y
 advertencias de seguridad: [native/LAN.md](native/LAN.md).
@@ -46,7 +48,7 @@ Conservan el token, certificado LAN y Tailscale Serve.
 ## Arranque
 
 ```powershell
-cd C:\Dev\muse-remote
+cd muse-remote
 node server.js
 ```
 
@@ -137,8 +139,8 @@ Variables opcionales: `MUSE_REMOTE_PORT` (def. 8787),
 ## Tests
 
 ```powershell
-npm test                  # pure Node tests, no Meta login required
-npm run test:integration  # optional: live tests against an authenticated local Muse CLI
+npm test                  # credential-free Node tests
+npm run test:integration  # optional live tests (authenticated local Muse CLI)
 ```
 
 ## Que cubre la app
@@ -157,8 +159,7 @@ Android, estado idle/running/waiting/poll, última sesión retomada,
 instalable, dark mode.
 
 Límites honestos del protocolo en este PC: `session/rename` no
-soportado en Windows; la PWA envía imágenes; el cliente Android nativo también puede
-subir documentos al equipo anfitrión (ver native/README.md); sin borrado de sesiones; sin parámetros de modelo más allá
+soportado en Windows; PWA: adjuntos de imagen; Android nativo: envío de documentos al anfitrión (ver native/README.md); sin borrado de sesiones; sin parámetros de modelo más allá
 de modelo/effort.
 
 Notificaciones push con la app cerrada (Web Push/VAPID, sin
