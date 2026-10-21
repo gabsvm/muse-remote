@@ -1,11 +1,36 @@
-# muse-remote
+# Muse Remote — Unofficial remote companion for Muse Code
 
-PWA mobile-first para controlar el **Muse Code CLI oficial** (tu login/
-subscription del navegador) desde el telefono. No implementa ningun
-cliente de Model API ni usa API keys PAYG: toda la inferencia la ejecuta
-`muse serve` en este PC a traves de su protocolo oficial MSP.
+> **Independent community project.** Not affiliated with, endorsed by, or sponsored by Meta. Muse Code, MSP, and related marks belong to their respective owners. Muse Code CLI must be installed separately; this repository does not distribute it or provide model access.
 
-## Cliente Kotlin Multiplatform sin Cloudflare
+Muse Remote lets you interact with coding sessions running on your own computer from a phone or desktop. It includes a Node.js MSP-to-HTTP bridge, a mobile-first PWA, and in-progress Kotlin Multiplatform clients for Android and desktop.
+
+## Features and current maturity
+
+- Reuse your locally installed and authenticated Muse Code CLI through the MSP protocol; no bundled CLI or subscription.
+- Browse and resume sessions, send prompts, inspect streamed output, see tools, approve requests, and manage supported session controls.
+- Mobile PWA with optional HTTPS access via Tailscale Serve or Cloudflare Access.
+- Early native Android/desktop clients with optional secure LAN pairing, QR-based TLS certificate pinning, and Tailscale fallback.
+- **Pre-1.0 development software.** The native app is not yet a production-ready release. Protocol compatibility depends on your installed Muse CLI version; see [native/README.md](native/README.md) for tested scope and limitations.
+
+## Quick start
+
+Requirements: Node.js 22+ recommended and the [official Muse Code CLI](https://dev.meta.ai/docs/muse-code) installed and authenticated separately.
+
+    git clone https://github.com/gabsvm/muse-remote.git
+    cd muse-remote
+    npm install
+    npm test
+    npm start
+
+Open http://127.0.0.1:8787 on the host. The local token is generated on first start; never share it. To connect a phone securely, follow the documented tunnel or LAN/Tailscale setup below.
+
+**Security warning:** an authenticated remote client can run coding-agent actions (including shell commands) with your host user's permissions. Use a normal OS account, private networking, TLS, and a strong app token. Never forward the local HTTP port directly to the public Internet. Read [SECURITY.md](SECURITY.md).
+
+## Contribute / license
+
+Licensed under [MIT](LICENSE) for original project code. Third-party dependencies, icons, and Meta Muse Code have their own licenses and terms. See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and the [release checklist](docs/OSS_RELEASE_CHECKLIST.md).
+
+---
 
 El nuevo APK puede conectarse por LAN HTTPS con descubrimiento de la PC,
 certificado fijado por QR y respaldo Tailscale Serve. Configuración y
@@ -112,7 +137,8 @@ Variables opcionales: `MUSE_REMOTE_PORT` (def. 8787),
 ## Tests
 
 ```powershell
-npm test   # node --test test/ : handshake, model/list, session/list reales + HTTP/auth
+npm test                  # pure Node tests, no Meta login required
+npm run test:integration  # optional: live tests against an authenticated local Muse CLI
 ```
 
 ## Que cubre la app
@@ -131,8 +157,8 @@ Android, estado idle/running/waiting/poll, última sesión retomada,
 instalable, dark mode.
 
 Límites honestos del protocolo en este PC: `session/rename` no
-soportado en Windows; adjuntos solo imagen (archivos como texto o
-`@ruta`); sin borrado de sesiones; sin parámetros de modelo más allá
+soportado en Windows; la PWA envía imágenes; el cliente Android nativo también puede
+subir documentos al equipo anfitrión (ver native/README.md); sin borrado de sesiones; sin parámetros de modelo más allá
 de modelo/effort.
 
 Notificaciones push con la app cerrada (Web Push/VAPID, sin
