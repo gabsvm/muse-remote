@@ -1,8 +1,8 @@
 # Open-source release checklist
 
-Status: **preparation; not approval to expose a production system.**
+Status: **public MIT-licensed source preview v0.1.0-pre.1**. Native APK is not claimed production-ready; further verification is required before stable binary releases.
 
-## Required before public visibility
+## Remaining checks before stable binary distribution
 
 - [ ] Confirm rights to distribute all code, icons, bundled assets and dependencies. MIT covers only code you own.
 - [ ] Inspect all reachable Git history, tags, branches, release assets, PR attachments and Actions logs for credentials, personal data, private endpoints, QR codes and customer content. Rotate any leaked secret.
@@ -11,9 +11,9 @@ Status: **preparation; not approval to expose a production system.**
 - [ ] Verify Node unit suite, optional Muse CLI integration suite, Android/Desktop CI independently. Never run authenticated live tests on untrusted PRs.
 - [ ] Test LAN, Tailscale, pairing, authentication failure, upload constraints, reconnect and revocation on a fresh physical device.
 - [ ] Decide if v0.x distribution is source-only or a clearly marked QA APK. Do not advertise the current QA APK as production-ready.
-- [ ] Verify non-affiliation disclosure with Meta, repository metadata, issue templates and security reporting.
-- [ ] Update main to include tested Kotlin/Compose changes instead of the old PWA-only branch.
-- [ ] Publish truthful release notes, installation instructions and current limitations; verify the public URL and detected license.
+- [x] Publish independence notice, repository metadata, issue templates, and enable private vulnerability reporting.
+- [x] Merge current Kotlin/Compose branch into main (PR #2).
+- [x] Publish pre-release source notes and installation/limitations documentation; confirm MIT license in main.
 
 ## First-pass findings (2026-10-21)
 
