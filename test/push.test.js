@@ -2,6 +2,8 @@
 // endpoints. No requiere `muse serve`.
 'use strict';
 const { test, before, after } = require('node:test');
+// Isolate HTTP tests from a token file shared with other test workers.
+process.env.MUSE_REMOTE_TOKEN = 'muse-remote-unit-test-local-only-token';
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const os = require('node:os');
