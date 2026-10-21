@@ -9,8 +9,9 @@
   "scripts": {
     "start": "node server.js",
     "tunnel": "node scripts/tunnel.js",
-    "test": "node --test test/push.test.js test/tunnel.test.js test/msp.test.js test/api.test.js test/client.test.js test/security.test.js test/image.test.js test/timeout.test.js test/lan.test.js",
-    "lan:pair": "node scripts/lan-pair.js"
+    "test": "node --test test/push.test.js test/tunnel.test.js test/api.test.js test/client.test.js test/security.test.js test/image.test.js test/timeout.test.js test/lan.test.js test/upload.test.js",
+    "lan:pair": "node scripts/lan-pair.js",
+    "test:integration": "node --test test/msp.test.js"
   },
   "license": "MIT",
   "dependencies": {
