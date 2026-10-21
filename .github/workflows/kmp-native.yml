@@ -2,7 +2,7 @@ name: Muse Remote KMP
 on:
   workflow_dispatch:
   push:
-    branches: [feat/kmp-compose-native]
+    branches: [main, feat/kmp-compose-native]
     paths:
       - 'native/**'
       - '.github/workflows/kmp-native.yml'
@@ -53,8 +53,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
-      - name: Prepare stable QA signing key (push only)
-        if: github.event_name != 'pull_request'
+      - name: Prepare stable QA signing key (manual main only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         env:
           KEY_B64: ${{ secrets.MUSE_QA_KEYSTORE_B64 }}
           KEY_PASSWORD: ${{ secrets.MUSE_QA_STORE_PASSWORD }}
@@ -72,14 +72,14 @@ jobs:
         env:
           MUSE_QA_STORE_PASSWORD: ${{ secrets.MUSE_QA_STORE_PASSWORD }}
         run: gradle -p native :androidApp:assembleDebug
-      - name: Inspect APK signature (push only)
-        if: github.event_name != 'pull_request'
+      - name: Inspect APK signature (manual main only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         run: |
           APK="$(find native/androidApp/build/outputs/apk/debug -name '*.apk' -print -quit)"
           test -n "$APK"
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
-      - name: Upload stable QA APK (push only)
-        if: github.event_name != 'pull_request'
+      - name: Upload stable QA APK (manual main only)
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: muse-remote-qa-signed
