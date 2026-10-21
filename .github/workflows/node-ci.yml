@@ -30,6 +30,6 @@ jobs:
         with:
           node-version: '22'
       - name: Install pinned direct dependencies without lifecycle scripts
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Credential-free Node unit tests
         run: npm test
