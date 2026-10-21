@@ -1,7 +1,7 @@
 name: Windows launchers smoke
 on:
   push:
-    branches: [feat/kmp-compose-native]
+    branches: [main, feat/kmp-compose-native]
     paths:
       - 'scripts/windows/**'
       - '.github/workflows/windows-shortcuts.yml'
