@@ -20,8 +20,8 @@ Ejecuta PowerShell con GitHub CLI autenticado (una sola vez):
 
 ```powershell
 cd C:\Dev\muse-remote
-git switch feat/kmp-compose-native
-git pull
+git switch main
+git pull --ff-only
 gh auth status
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-android-qa-signing.ps1
 ```
@@ -44,9 +44,7 @@ el perfil de Windows.
 
 Cuando los secretos estén listos, vuelve a ejecutar el workflow
 [Muse Remote KMP](https://github.com/gabsvm/muse-remote/actions/workflows/kmp-native.yml)
-en `feat/kmp-compose-native`. Si no aparece «Run workflow», haz un nuevo
-push a esa rama (solo un commit vacío basta). Los PR comprueban
-compilación sin publicar un APK firmado de manera aleatoria.
+manualmente mediante «Run workflow» en `main`. Solo las ejecuciones manuales en `main` usan la clave QA estable y publican el APK firmado. Las ejecuciones de PR y los pushes normales prueban la compilación sin distribuir APKs con firmas efímeras.
 
 **Una última transición será necesaria**: los APK anteriores fueron
 firmados con claves desechables y no pueden actualizarse con la nueva.
