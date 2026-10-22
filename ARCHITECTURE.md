@@ -1,5 +1,7 @@
 # muse-remote — arquitectura (derivada del protocolo real)
 
+> **Nota de mantenimiento (2026-10-22):** este archivo contiene hitos históricos y observaciones del CLI 1.3.0. Algunos apartados marcados como «siguiente/no incluido» describen el estado de septiembre, no el estado actual. Para la matriz vigente consultar [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md), [native/README.md](native/README.md) y [docs/ROADMAP.md](docs/ROADMAP.md).
+
 CLI auditado: `Muse Code 1.3.0`. Todo lo de abajo se observo en esta
 instalacion (`muse serve --help`, `muse schema generate-json-schema`,
 pruebas live por stdio). Nada inventado, nada de scraping de TUI.

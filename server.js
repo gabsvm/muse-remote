@@ -83,17 +83,41 @@ const SESSION_LIST_TIMEOUT = 180000;
 const METHOD_TIMEOUTS = { 'session/list': SESSION_LIST_TIMEOUT };
 function timeoutForMethod(method) { return METHOD_TIMEOUTS[method] || DEFAULT_MSP_TIMEOUT; }
 
-function loadOrCreateToken() {
-  if (process.env.MUSE_REMOTE_TOKEN && process.env.MUSE_REMOTE_TOKEN.length >= 16) {
-    return process.env.MUSE_REMOTE_TOKEN;
+function loadOrCreateToken(tokenFile = TOKEN_FILE, env = process.env) {
+  if (env.MUSE_REMOTE_TOKEN && env.MUSE_REMOTE_TOKEN.length >= 16) {
+    return env.MUSE_REMOTE_TOKEN;
   }
-  try {
-    const saved = fs.readFileSync(TOKEN_FILE, 'utf8').trim();
-    if (saved.length >= 16) return saved;
-  } catch { /* no existe: generar */ }
+  // Two independent processes (CI workers, CLI + service) can start at the
+  // same time. Never overwrite an existing token: that would revoke a device
+  // silently, or make another process accept a token different from disk.
+  const readSaved = () => {
+    try {
+      const saved = fs.readFileSync(tokenFile, 'utf8').trim();
+      return saved.length >= 16 ? saved : null;
+    } catch (e) {
+      if (e.code === 'ENOENT') return null;
+      throw e;
+    }
+  };
+  const saved = readSaved();
+  if (saved) return saved;
   const tok = crypto.randomBytes(32).toString('hex');
-  fs.writeFileSync(TOKEN_FILE, tok + '\n', { mode: 0o600 });
-  return tok;
+  try {
+    fs.writeFileSync(tokenFile, tok + '\n', { mode: 0o600, flag: 'wx' });
+    return tok;
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e;
+  }
+  // Another process created the file. Its write may not have finished yet.
+  // Bounded wait prevents accidentally generating a second token or masking
+  // permissions/read errors (which must fail closed).
+  for (let i = 0; i < 25; i++) {
+    const current = readSaved();
+    if (current) return current;
+    const shared = new Int32Array(new SharedArrayBuffer(4));
+    Atomics.wait(shared, 0, 0, 20);
+  }
+  throw new Error('Existing Muse Remote token file is unreadable or invalid; refusing to replace it');
 }
 const AUTH_TOKEN = loadOrCreateToken();
 
@@ -174,7 +198,7 @@ class MspHost {
     child.on('error', (e) => { this.lastError = String(e).slice(0, 300); });
     // Handshake SS1.4.1: initialize -> initialized (notificacion).
     this.rawRequest('initialize', {
-      clientInfo: { name: 'muse_remote', version: '0.1.0' },
+      clientInfo: { name: 'muse_remote', version: '0.2.0-beta.1' },
       // userShell: autoriza session/userShell; userInputDialogs: declara que
       // la PWA sí renderiza y responde prompts interactivos del modelo.
       capabilities: { requestedCapabilities: ['userShell'], userInputDialogs: true },
@@ -438,7 +462,7 @@ async function handle(req, res) {
   const pathname = u.pathname;
 
   if (req.method === 'GET' && pathname === '/api/health') {
-    return sendJson(res, 200, { ok: true, mspReady: msp.ready, serverInfo: msp.serverInfo, version: '0.1.0', features: { fileUpload: true } });
+    return sendJson(res, 200, { ok: true, mspReady: msp.ready, ...(authorized(req) ? { serverInfo: msp.serverInfo } : {}), version: '0.2.0-beta.1', features: { fileUpload: true } });
   }
   if (req.method === 'GET' && pathname === '/api/command-id') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });

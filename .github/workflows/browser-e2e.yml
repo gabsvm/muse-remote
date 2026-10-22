@@ -1,0 +1,41 @@
+name: Browser mock-session smoke
+on:
+  pull_request:
+    paths:
+      - 'public/**'
+      - 'server.js'
+      - 'test/**'
+      - 'e2e/**'
+      - 'scripts/qa/**'
+      - 'playwright.config.cjs'
+      - 'package*.json'
+      - '.github/workflows/browser-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  browser-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Install pinned packages
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install headless Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Test desktop and mobile viewports with fake bridge (no Muse CLI)
+        run: npm run test:e2e
+      - name: Attach test diagnostics only on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke-diagnostics
+          path: test-results/
+          retention-days: 7
+          if-no-files-found: ignore

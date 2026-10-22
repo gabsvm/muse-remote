@@ -1,5 +1,8 @@
 # Muse Remote — accesos directos Windows
 
+**¿Primera instalación?** Usá `01_Instalar.cmd` → `02_Iniciar_PWA.cmd` → `03_Diagnostico.cmd` para iniciar el puente local sin configurar túneles ni utilizar suscripciones de IA. Estos son nuevos lanzadores de la beta 0.2 y no reemplazan los accesos LAN existentes (01_Emparejar_LAN, etc.). Si perdés un dispositivo, `04_Revocar_dispositivos.cmd` rota el token global con confirmación y requiere que el servidor esté detenido. Ver [guía completa](../../docs/INICIO_RAPIDO.md).
+
+
 No es necesario escribir comandos cada vez. Estos archivos se abren con
 **doble clic** desde el Explorador de Windows.
 
