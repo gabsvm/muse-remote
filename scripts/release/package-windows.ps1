@@ -23,7 +23,10 @@ $Version=(Get-Content (Join-Path $Root 'package.json') -Raw | ConvertFrom-Json).
 $Manifest=[ordered]@{version=$Version; platform='Windows'; distribution='portable source setup'; files=@{}}
 foreach($item in Get-ChildItem $Stage -Recurse -File){
   $key=$item.FullName.Substring($Stage.Length+1).Replace('\','/')
-  $Manifest.files[$key]=(Get-FileHash $item.FullName -Algorithm SHA256).Hash.ToLower()
+  $sha=[System.Security.Cryptography.SHA256]::Create()
+  $stream=[System.IO.File]::OpenRead($item.FullName)
+  try { $Manifest.files[$key]=([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-','').ToLowerInvariant() }
+  finally { $stream.Dispose();$sha.Dispose() }
 }
 $Manifest | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $Stage 'MANIFEST.json') -Encoding utf8
 New-Item -ItemType Directory -Path (Split-Path $Output) -Force | Out-Null
