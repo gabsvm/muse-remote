@@ -4,7 +4,7 @@ kotlin = "2.4.10"
 compose = "1.11.1"
 ktor = "3.5.1"
 coroutines = "1.11.0"
-serialization = "1.11.0"
+serialization = "1.12.0"
 activity = "1.13.0"
 code-scanner = "16.1.0"
 
