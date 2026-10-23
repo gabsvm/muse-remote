@@ -80,7 +80,7 @@ jobs:
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK"
       - name: Upload stable QA APK (manual main only)
         if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: muse-remote-qa-signed
           path: native/androidApp/build/outputs/apk/debug/*.apk
