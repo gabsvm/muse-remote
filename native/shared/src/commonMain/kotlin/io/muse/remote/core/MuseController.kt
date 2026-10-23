@@ -36,6 +36,8 @@ class MuseController(
     private var watchdogJob: Job? = null
     private var started = false
     private var listJob: Job? = null
+    private var modelJob: Job? = null
+    private var settingsJob: Job? = null
     private var listSequence = 0L
     private var lastEvent = TimeSource.Monotonic.markNow()
 
@@ -201,6 +203,9 @@ class MuseController(
                 screen = Screen.Conversation, sessionId = id,
                 sessionTitle = known?.title ?: "Sesión ${id.take(8)}",
                 workspace = known?.workspace.orEmpty(),
+                models = emptyList(), activeModelId = known?.model?.takeIf(String::isNotBlank),
+                reasoningEffort = null, modelSettingsLoading = false,
+                modelSettingsSaving = false, modelSettingsError = null,
                 items = emptyList(), approvals = emptyList(), questions = emptyList(),
                 loading = true, sessionReady = false, sessionBusyElsewhere = false,
                 working = false, sending = false,
@@ -256,6 +261,9 @@ class MuseController(
                         sessionTitle = session?.string("name")?.takeIf(String::isNotBlank)
                             ?: it.sessionTitle,
                         workspace = session?.string("workspaceRoot") ?: it.workspace,
+                        activeModelId = session?.string("modelId")
+                            ?: session?.obj("model")?.string("modelId") ?: it.activeModelId,
+                        reasoningEffort = session?.string("reasoningEffort"),
                         working = session?.string("status") == "running",
                         stream = "Conectando directo…",
                         viewCursor = result.string("viewCursor"), error = null,
@@ -266,6 +274,7 @@ class MuseController(
                 if (seq != generation) return@launch
                 startConnection(id, seq)
                 refreshPending(id, seq)
+                refreshModelSettings()
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (resumeError: Exception) {
@@ -318,9 +327,89 @@ class MuseController(
                 approvals = emptyList(), questions = emptyList(), working = false,
                 sessionReady = false, sessionBusyElsewhere = false,
                 loading = false, sending = false,
+                models = emptyList(), activeModelId = null, reasoningEffort = null,
+                modelSettingsLoading = false, modelSettingsSaving = false, modelSettingsError = null,
                 turnId = null, viewCursor = null, stream = "PC conectada", error = null)
         }
         refreshSessions()
+    }
+
+    /** Session-scoped RPC calls prevent stale settings crossing conversations. */
+    fun refreshModelSettings() {
+        val current = mutable.value
+        val sid = current.sessionId ?: return
+        if (!current.sessionReady || current.modelSettingsSaving) return
+        val seq = generation
+        modelJob?.cancel()
+        mutable.update { it.copy(modelSettingsLoading = true, modelSettingsError = null) }
+        modelJob = scope.launch {
+            try {
+                val models = gateway.listModels(sid)
+                if (seq != generation || mutable.value.sessionId != sid) return@launch
+                mutable.update {
+                    it.copy(models = models,
+                        activeModelId = models.firstOrNull { m -> m.isActive }?.id
+                            ?: it.activeModelId,
+                        modelSettingsLoading = false,
+                        modelSettingsError = if (models.isEmpty()) "Muse no devolvió modelos." else null)
+                }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (e: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                    it.copy(modelSettingsLoading = false,
+                        modelSettingsError = "No se pudo consultar modelos: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun changeModel(modelId: String) {
+        val current = mutable.value
+        val sid = current.sessionId ?: return
+        if (!current.sessionReady || current.working || current.sending ||
+            current.modelSettingsSaving || current.modelSettingsLoading ||
+            current.models.none { it.id == modelId } || current.activeModelId == modelId) return
+        val seq = generation
+        mutable.update { it.copy(modelSettingsSaving = true, modelSettingsError = null) }
+        settingsJob = scope.launch {
+            try {
+                gateway.setModel(sid, modelId)
+                if (seq != generation || mutable.value.sessionId != sid) return@launch
+                mutable.update { it.copy(activeModelId = modelId, reasoningEffort = null,
+                    modelSettingsSaving = false, modelSettingsError = null,
+                    models = it.models.map { m -> m.copy(isActive = m.id == modelId) }) }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (e: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                    it.copy(modelSettingsSaving = false,
+                        modelSettingsError = "Muse rechazó el modelo: ${e.message}")
+                }
+            }
+        }
+    }
+
+    fun changeReasoningEffort(effort: String) {
+        val current = mutable.value
+        val sid = current.sessionId ?: return
+        if (!current.sessionReady || current.working || current.sending ||
+            current.modelSettingsSaving || current.modelSettingsLoading ||
+            effort !in reasoningEffortLevels || current.reasoningEffort == effort) return
+        val seq = generation
+        mutable.update { it.copy(modelSettingsSaving = true, modelSettingsError = null) }
+        settingsJob = scope.launch {
+            try {
+                gateway.setReasoningEffort(sid, effort)
+                if (seq != generation || mutable.value.sessionId != sid) return@launch
+                mutable.update { it.copy(reasoningEffort = effort,
+                    modelSettingsSaving = false, modelSettingsError = null) }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (e: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                    it.copy(modelSettingsSaving = false,
+                        modelSettingsError = "Muse rechazó el nivel: ${e.message}")
+                }
+            }
+        }
     }
 
     fun send(text: String, attachment: ComposerAttachment? = null) {
@@ -597,6 +686,7 @@ class MuseController(
 
     private fun cancelConversation() {
         openJob?.cancel(); streamJob?.cancel(); syncJob?.cancel(); watchdogJob?.cancel()
+        modelJob?.cancel(); settingsJob?.cancel()
         openJob = null; streamJob = null; syncJob = null; watchdogJob = null
     }
 

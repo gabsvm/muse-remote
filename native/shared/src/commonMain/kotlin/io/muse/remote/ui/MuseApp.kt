@@ -518,6 +518,10 @@ private fun ConversationScene(
             StreamChip(state.stream)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+        if (state.sessionReady) {
+            ModelSettingsBar(state, controller)
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.14f))
+        }
         var waitingSeconds by remember(state.sessionId) { mutableIntStateOf(0) }
         LaunchedEffect(state.sessionId, state.loading) {
             waitingSeconds = 0
