@@ -57,7 +57,7 @@ jobs:
               throw 'Unexpected runtime file in archive'
             }
           } finally { $zip.Dispose() }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: muse-remote-windows-beta
           path: dist-packages/muse-remote-windows-beta.zip
