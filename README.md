@@ -1,4 +1,18 @@
-# Muse Remote — Unofficial remote companion for Muse Code
+# Muse Remote — Your Muse Code sessions, anywhere
+
+[![Node checks](https://github.com/gabsvm/muse-remote/actions/workflows/node-ci.yml/badge.svg)](https://github.com/gabsvm/muse-remote/actions/workflows/node-ci.yml) [![Kotlin/Android CI](https://github.com/gabsvm/muse-remote/actions/workflows/kmp-native.yml/badge.svg)](https://github.com/gabsvm/muse-remote/actions/workflows/kmp-native.yml) [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+**Open source · Windows bridge · Android · PWA · Kotlin Desktop**
+
+Continue coding-agent sessions from your phone or another device, with your own PC as the host. Muse Remote uses the separately installed Muse Code CLI through MSP — it does **not** bundle the CLI or give access to model subscriptions.
+
+**Current status: experimental beta.** The next target is `0.2.0-beta.1`; the latest published `v0.1.0-pre.1` is source-only. No production-ready APK has been released.
+
+**Start here:** [Windows & PWA quickstart](docs/QUICKSTART.md) · [Inicio rápido en español](docs/INICIO_RAPIDO.md) · [Compatibility](docs/COMPATIBILITY.md) · [Roadmap](docs/ROADMAP.md) · [Releases](https://github.com/gabsvm/muse-remote/releases)
+
+**Contribute:** [CONTRIBUTING.md](CONTRIBUTING.md) · [Security policy](SECURITY.md) · [How releases are verified](docs/RELEASING.md) · [Community demo guide](docs/DEMO_GUIDE.md)
+
+---
 
 > **Independent community project.** Not affiliated with, endorsed by, or sponsored by Meta. Muse Code, MSP, and related marks belong to their respective owners. Muse Code CLI must be installed separately; this repository does not distribute it or provide model access.
 
@@ -14,7 +28,7 @@ Muse Remote lets you interact with coding sessions running on your own computer 
 
 ## Quick start
 
-Requirements: Node.js 22+ recommended and the [official Muse Code CLI](https://dev.meta.ai/docs/muse-code) installed and authenticated separately.
+Requirements: Node.js 22+ required and the [official Muse Code CLI](https://dev.meta.ai/docs/muse-code) installed and authenticated separately.
 
     git clone https://github.com/gabsvm/muse-remote.git
     cd muse-remote
@@ -61,7 +75,9 @@ abajo.
 
 ## Acceso desde el movil
 
-### Opcion A — Cloudflare quick tunnel (sin instalar nada en el movil)
+### Opcion A — Cloudflare quick tunnel (experimental; no SSE)
+
+**Advertencia:** Cloudflare Quick Tunnels no admiten Server-Sent Events; por eso el streaming en vivo puede fallar. El login por correo exige un navegador interactivo y no es una alternativa confiable para Android nativo. Para uso habitual, preferí Tailscale Serve o un túnel con nombre protegido.
 
 Requiere [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
 en el PC (`winget install --id Cloudflare.cloudflared`). Sin cuenta ni

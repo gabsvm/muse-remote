@@ -9,6 +9,10 @@ Muse Remote is an **independent, community-maintained** client for Meta Muse Cod
 3. Keep changes small and include a test where practical.
 4. Never share login sessions, pairing QR codes, tokens, certificates, keystores, cloud credentials, identifiers, or live conversation contents.
 
+## Issues for new contributors
+
+Small, isolated fixes with a regression test are preferred. Label suitable tasks `good first issue`, and explain expected behavior, reproducer and how to test without logging in. For protocol changes, attach sanitized **mock** MSP fixtures rather than real session dumps. CI must never consume maintainers' subscription quotas or rely on login secrets.
+
 ## Local development
 
 Prerequisites: Node.js 22+ recommended. Install Meta Muse Code CLI separately and authenticate only if you want to run *optional* live integration testing.

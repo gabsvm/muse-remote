@@ -51,6 +51,8 @@ Las credenciales Desktop se mantienen solo en memoria por ahora. El escritorio p
 
 ## Calidad y alcance actual
 
+> **Nota 2026-10-22:** las listas de características pendientes en esta sección documentan la primera versión Kotlin; posteriormente se añadieron recuperación de sesiones, agrupación de herramientas y adjuntos, descritos al final de este mismo archivo. Para comparar con la PWA, consultar [compatibilidad](../docs/COMPATIBILITY.md).
+
 Esta es la **primera vertical funcional**, no la migración completa ni una versión de producción. Incluye acceso, listado paginado, recuperación inmediata de sesión reciente, nueva sesión, historial, envío de texto, estado de turno, interrupción, recepción SSE y sincronización de respaldo, aprobaciones y una pregunta de entrada simple. Las miniaturas, adjuntos, múltiples preguntas, diffs avanzados, prompts offline persistentes, cambio de modelo/effort, subagentes, configuración de notificaciones, QR de emparejamiento y distribución de iOS permanecen pendientes. No se han eliminado de la PWA.
 
 ### Tareas de cierre antes de producción
