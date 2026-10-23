@@ -72,6 +72,35 @@ class MuseGateway(
         return body.obj("result") ?: buildJsonObject {}
     }
 
+    /** Metadata query: does not invoke a coding model. Fallback mirrors PWA. */
+    suspend fun listModels(sessionId: String? = null): List<MuseModel> {
+        val scoped = sessionId?.let { id ->
+            runCatching { rpc("model/list", buildJsonObject { put("sessionId", id) }) }.getOrNull()
+        }
+        val cat = if (scoped?.array("models").isNullOrEmpty()) rpc("model/list") else scoped!!
+        return cat.array("models").orEmpty().mapNotNull {
+            (it as? JsonObject)?.let(MuseModel::from)
+        }.distinctBy { it.id }
+    }
+
+    suspend fun setModel(sessionId: String, modelId: String) {
+        require(modelId.isNotBlank()) { "Modelo inválido." }
+        rpc("session/setModel", buildJsonObject {
+            put("commandId", commandId())
+            put("sessionId", sessionId)
+            putJsonObject("model") { put("modelId", modelId) }
+        })
+    }
+
+    suspend fun setReasoningEffort(sessionId: String, effort: String) {
+        require(effort in reasoningEffortLevels) { "Nivel de razonamiento no reconocido." }
+        rpc("session/setReasoningEffort", buildJsonObject {
+            put("commandId", commandId())
+            put("sessionId", sessionId)
+            put("reasoningEffort", effort)
+        })
+    }
+
     suspend fun listAllSessions(
         maxPages: Int = 40,
         onPage: (pageNumber: Int, sessions: List<SessionSummary>) -> Unit = { _, _ -> },

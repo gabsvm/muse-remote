@@ -41,6 +41,31 @@ Puedes ejecutar también `androidApp` desde Android Studio. El APK se genera en 
 
 **Importante:** el APK admite LAN HTTPS con certificado fijado por QR o HTTPS de Tailscale Serve. Cloudflare Access con login interactivo no está integrado. Nunca expongas el puerto LAN al Internet público.
 
+## Selector de modelo y razonamiento (beta 0.2.0-beta.2)
+
+En una conversación **reanudada y editable**, bajo el título aparecen dos controles:
+**Modelo** y **Razonamiento**. El catálogo de modelos se obtiene del mismo
+`model/list` MSP que utiliza la PWA; no se inventa la disponibilidad de una
+suscripción. El modelo activo se identifica por la respuesta del servidor.
+
+El ajuste se realiza **por sesión**, con `session/setModel` y
+`session/setReasoningEffort`, y requiere confirmación del backend. Si Muse
+rechaza el cambio, la app conserva el último valor confirmado y muestra
+un error. Los selectores se bloquean durante un turno activo, durante
+sincronización de catálogo o mientras se guarda un cambio.
+
+Los niveles que ofrece el cliente coinciden con la PWA (none, minimal,
+low, medium, high, xhigh, max, ultra), pero cada modelo puede aceptar
+solo un subconjunto. El servidor decide qué niveles son compatibles.
+Cuando el estado actual no se recibe de MSP se muestra **Sin confirmar**,
+nunca un nivel inventado. Al cambiar de modelo se vuelve a indicar
+**Sin confirmar** hasta que el usuario elige un esfuerzo nuevo.
+
+La APK no consulta Model API ni lanza peticiones de inferencia al mostrar
+el catálogo. El control solo funciona si la sesión está disponible para
+Muse Remote; una sesión abierta simultáneamente en Terminal sigue en
+modo lectura.
+
 ## Desktop
 
 ```powershell

@@ -204,6 +204,17 @@ sealed interface ComposerAttachment {
     ) : ComposerAttachment
 }
 
+/** Model catalog from connected Muse CLI, never a hardcoded subscription list. */
+data class MuseModel(val id: String, val label: String, val isActive: Boolean) {
+    companion object {
+        fun from(raw: JsonObject): MuseModel? {
+            val id = raw.string("modelId")?.takeIf(String::isNotBlank) ?: return null
+            return MuseModel(id, raw.string("displayLabel")?.takeIf(String::isNotBlank) ?: id,
+                (raw["isActive"] as? JsonPrimitive)?.booleanOrNull == true)
+        }
+    }
+}
+val reasoningEffortLevels = listOf("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 enum class Screen { Login, Sessions, Conversation }
 
 data class MuseState(
@@ -224,6 +235,12 @@ data class MuseState(
     val sessions: List<SessionSummary> = emptyList(),
     val sessionId: String? = null,
     val sessionTitle: String = "",
+    val models: List<MuseModel> = emptyList(),
+    val activeModelId: String? = null,
+    val reasoningEffort: String? = null,
+    val modelSettingsLoading: Boolean = false,
+    val modelSettingsSaving: Boolean = false,
+    val modelSettingsError: String? = null,
     val workspace: String = "",
     val items: List<ChatItem> = emptyList(),
     val approvals: List<PendingApproval> = emptyList(),
