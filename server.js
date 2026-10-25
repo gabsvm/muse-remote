@@ -12,6 +12,16 @@ const { URL } = require('url');
 const { PushStore, pushForMsp } = require('./push');
 const { writeUpload, readUploadBody } = require('./uploads');
 const { readContributorSettings, saveContributorSettings } = require('./contributor');
+// A cached boot snapshot makes the pending-restart warning survive UI refreshes.
+const CONTRIBUTOR_BOOT_VALUE = readContributorSettings().value;
+function contributorReadStatus() {
+  const current = readContributorSettings();
+  if (current.available && current.value !== CONTRIBUTOR_BOOT_VALUE) {
+    return { ...current, needsRestart: true,
+      reason: 'La preferencia cambió desde el arranque. Reiniciá Muse Remote en la PC para aplicarla.' };
+  }
+  return current;
+}
 
 // Solo loopback. Nunca 0.0.0.0 ni exposicion publica (el acceso remoto lo
 // proporciona el usuario con Tailscale Serve por fuera de esta app).
@@ -467,7 +477,7 @@ async function handle(req, res) {
   }
   if (pathname === '/api/contributor' && req.method === 'GET') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
-    return sendJson(res, 200, { ok: true, ...readContributorSettings() });
+    return sendJson(res, 200, { ok: true, ...contributorReadStatus() });
   }
   if (pathname === '/api/contributor' && req.method === 'POST') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
