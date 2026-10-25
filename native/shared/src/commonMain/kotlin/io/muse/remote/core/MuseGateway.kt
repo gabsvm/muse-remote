@@ -49,6 +49,38 @@ class MuseGateway(
         rpc("model/list")
     }
 
+    /** Contributor is a global PC privacy preference, NOT per-session model. */
+    suspend fun readContributor(): ContributorStatus {
+        val c = auth()
+        val response = client.get(c.base + "/api/contributor") {
+            header(HttpHeaders.Authorization, "Bearer " + c.token)
+        }
+        if (response.status.value == 404) return ContributorStatus(
+            reason = "Actualizá el servidor Muse Remote de tu PC para controlar Contributor.")
+        val body = requireSuccess(response.status.value, response.bodyAsText())
+        return contributorStatus(body)
+    }
+
+    suspend fun changeContributor(enabled: Boolean, explicitConsent: Boolean): ContributorStatus {
+        val c = auth()
+        val response = client.post(c.base + "/api/contributor") {
+            header(HttpHeaders.Authorization, "Bearer " + c.token)
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("enabled", enabled)
+                put("confirmed", explicitConsent)
+            }.toString())
+        }
+        return contributorStatus(requireSuccess(response.status.value, response.bodyAsText()))
+    }
+
+    private fun contributorStatus(raw: JsonObject) = ContributorStatus(
+        available = (raw["available"] as? JsonPrimitive)?.booleanOrNull == true,
+        value = (raw["value"] as? JsonPrimitive)?.booleanOrNull,
+        needsRestart = (raw["needsRestart"] as? JsonPrimitive)?.booleanOrNull == true,
+        reason = raw.string("reason"),
+    )
+
     suspend fun commandId(): String {
         val c = auth()
         val response = client.get(c.base + "/api/command-id") {

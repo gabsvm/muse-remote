@@ -6,6 +6,9 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import io.muse.remote.core.CredentialsStore
 import io.muse.remote.core.ServerCredentials
+import io.muse.remote.core.RemoteProject
+import org.json.JSONArray
+import org.json.JSONObject
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -19,6 +22,7 @@ import javax.crypto.spec.GCMParameterSpec
  */
 class AndroidCredentialsStore(context: Context) : CredentialsStore {
     private val prefs = context.getSharedPreferences("muse_remote_secure_v1", Context.MODE_PRIVATE)
+    private val organizer = context.getSharedPreferences("muse_remote_organizer_v1", Context.MODE_PRIVATE)
     private val alias = "muse_remote_token_aes_v1"
 
     private fun key(): SecretKey {
@@ -73,6 +77,47 @@ class AndroidCredentialsStore(context: Context) : CredentialsStore {
             // or recent-session state merely because Keystore read failed.
             // A transient OS failure is not an explicit sign-out.
             null
+        }
+    }
+
+    override fun projects(): List<RemoteProject> = runCatching {
+        val array = JSONArray(organizer.getString("projects", "[]") ?: "[]")
+        (0 until minOf(array.length(), 100)).mapNotNull { n ->
+            val x = array.optJSONObject(n) ?: return@mapNotNull null
+            val id = x.optString("id").takeIf(String::isNotBlank) ?: return@mapNotNull null
+            RemoteProject(id, x.optString("name").take(64), x.optString("workspace").take(512))
+        }
+    }.getOrDefault(emptyList())
+
+    override fun saveProjects(value: List<RemoteProject>) {
+        val array = JSONArray()
+        value.take(100).forEach { p ->
+            array.put(JSONObject().put("id", p.id).put("name", p.name).put("workspace", p.workspace))
+        }
+        check(organizer.edit().putString("projects", array.toString()).commit()) {
+            "No se pudo guardar la lista de proyectos."
+        }
+    }
+
+    override fun projectAssignments(): Map<String, String> = runCatching {
+        val obj = JSONObject(organizer.getString("assignments", "{}") ?: "{}")
+        obj.keys().asSequence().take(10000).associateWith { key -> obj.optString(key) }
+    }.getOrDefault(emptyMap())
+
+    override fun saveProjectAssignments(value: Map<String, String>) {
+        val obj = JSONObject()
+        value.entries.take(10000).forEach { obj.put(it.key, it.value) }
+        check(organizer.edit().putString("assignments", obj.toString()).commit()) {
+            "No se pudieron guardar los chats de los proyectos."
+        }
+    }
+
+    override fun pinnedSessionIds(): Set<String> =
+        organizer.getStringSet("pinned", emptySet())?.toSet() ?: emptySet()
+
+    override fun savePinnedSessionIds(value: Set<String>) {
+        check(organizer.edit().putStringSet("pinned", value).commit()) {
+            "No se pudieron guardar los chats fijados."
         }
     }
 

@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'server.js'
+      - 'contributor.js'
       - 'lan.js'
       - 'push.js'
       - 'uploads.js'

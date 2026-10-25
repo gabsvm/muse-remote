@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlin.time.TimeSource
+import kotlin.random.Random
 
 /**
  * Single owner of remote-session state. UI never speaks MSP or HTTP directly.
@@ -22,6 +23,8 @@ class MuseController(
     private val mutable = MutableStateFlow(
         MuseState(
             hiddenSessionIds = credentials.hiddenSessionIds(),
+            projects = credentials.projects(), projectAssignments = credentials.projectAssignments(),
+            pinnedSessionIds = credentials.pinnedSessionIds(),
             savedConnectionAvailable = savedLoginAtStart != null,
             restoringConnection = savedLoginAtStart != null,
             loading = savedLoginAtStart != null,
@@ -38,6 +41,8 @@ class MuseController(
     private var listJob: Job? = null
     private var modelJob: Job? = null
     private var settingsJob: Job? = null
+    private var contributorJob: Job? = null
+
     private var listSequence = 0L
     private var lastEvent = TimeSource.Monotonic.markNow()
 
@@ -130,7 +135,9 @@ class MuseController(
         listSequence++
         gateway.signOut()
         credentials.clear()
-        mutable.value = MuseState(hiddenSessionIds = credentials.hiddenSessionIds())
+        mutable.value = MuseState(hiddenSessionIds = credentials.hiddenSessionIds(),
+            projects = credentials.projects(), projectAssignments = credentials.projectAssignments(),
+            pinnedSessionIds = credentials.pinnedSessionIds())
     }
 
     fun hideSession(id: String) {
@@ -143,6 +150,97 @@ class MuseController(
     fun restoreSession(id: String) {
         credentials.restoreSession(id)
         mutable.update { it.copy(hiddenSessionIds = credentials.hiddenSessionIds()) }
+    }
+
+    fun refreshContributor() {
+        if (!mutable.value.authenticated) return
+        val seq = generation
+        contributorJob?.cancel()
+        mutable.update { it.copy(contributorLoading = true) }
+        contributorJob = scope.launch {
+            try {
+                val status = gateway.readContributor()
+                if (seq == generation && mutable.value.authenticated) mutable.update {
+                    it.copy(contributor = status, contributorLoading = false)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (seq == generation) mutable.update {
+                    it.copy(contributorLoading = false,
+                        contributor = ContributorStatus(reason = e.message))
+                }
+            }
+        }
+    }
+
+    /** Explicit host-wide privacy change; never silently toggled by selecting a model. */
+    fun changeContributor(enabled: Boolean, explicitConsent: Boolean) {
+        if (!mutable.value.authenticated || mutable.value.contributorSaving ||
+            !mutable.value.contributor.available ||
+            (enabled && !explicitConsent)) return
+        val seq = generation
+        mutable.update { it.copy(contributorSaving = true) }
+        contributorJob = scope.launch {
+            try {
+                val status = gateway.changeContributor(enabled, explicitConsent)
+                if (seq == generation) mutable.update {
+                    it.copy(contributor = status, contributorSaving = false)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (seq == generation) mutable.update {
+                    it.copy(contributorSaving = false,
+                        contributor = it.contributor.copy(reason = e.message))
+                }
+            }
+        }
+    }
+
+    fun createProject(name: String, workspace: String = "") {
+        val normalized = name.trim().take(64)
+        if (normalized.isBlank()) { reportError("Escribe el nombre del proyecto."); return }
+        if (mutable.value.projects.size >= 100) { reportError("Límite de 100 proyectos."); return }
+        val id = "p-" + Random.nextLong().toULong().toString(16) +
+            Random.nextLong().toULong().toString(16)
+        val updated = mutable.value.projects + RemoteProject(id, normalized, workspace.trim().take(512))
+        credentials.saveProjects(updated)
+        mutable.update { it.copy(projects = updated) }
+    }
+
+    fun updateProject(id: String, name: String, workspace: String) {
+        if (mutable.value.projects.none { it.id == id } || name.trim().isBlank()) return
+        val updated = mutable.value.projects.map {
+            if (it.id == id) it.copy(name = name.trim().take(64),
+                workspace = workspace.trim().take(512)) else it
+        }
+        credentials.saveProjects(updated)
+        mutable.update { it.copy(projects = updated) }
+    }
+
+    fun deleteProject(id: String) {
+        if (mutable.value.projects.none { it.id == id }) return
+        val projects = mutable.value.projects.filterNot { it.id == id }
+        val assignments = mutable.value.projectAssignments.filterValues { it != id }
+        credentials.saveProjects(projects)
+        credentials.saveProjectAssignments(assignments)
+        mutable.update { it.copy(projects = projects, projectAssignments = assignments) }
+    }
+
+    fun assignSession(sessionId: String, projectId: String?) {
+        if (sessionId.isBlank() || (projectId != null && mutable.value.projects.none { it.id == projectId })) return
+        val updated = mutable.value.projectAssignments.toMutableMap()
+        if (projectId == null) updated.remove(sessionId)
+        else updated[sessionId] = projectId
+        credentials.saveProjectAssignments(updated)
+        mutable.update { it.copy(projectAssignments = updated) }
+    }
+
+    fun togglePinned(sessionId: String) {
+        if (sessionId.isBlank()) return
+        val updated = mutable.value.pinnedSessionIds.toMutableSet()
+        if (!updated.add(sessionId)) updated.remove(sessionId)
+        credentials.savePinnedSessionIds(updated)
+        mutable.update { it.copy(pinnedSessionIds = updated) }
     }
 
     fun refreshSessions() {
@@ -174,7 +272,7 @@ class MuseController(
         }
     }
 
-    fun createSession(workspace: String) {
+    fun createSession(workspace: String, projectId: String? = null) {
         if (!mutable.value.authenticated) return
         val seq = ++generation
         cancelConversation()
@@ -183,6 +281,7 @@ class MuseController(
             try {
                 val id = gateway.startSession(workspace)
                 if (generation != seq) return@launch
+                if (projectId != null) assignSession(id, projectId)
                 openSession(id)
                 refreshSessions()
             } catch (cancel: CancellationException) {
@@ -686,7 +785,7 @@ class MuseController(
 
     private fun cancelConversation() {
         openJob?.cancel(); streamJob?.cancel(); syncJob?.cancel(); watchdogJob?.cancel()
-        modelJob?.cancel(); settingsJob?.cancel()
+        modelJob?.cancel(); settingsJob?.cancel(); contributorJob?.cancel()
         openJob = null; streamJob = null; syncJob = null; watchdogJob = null
     }
 
