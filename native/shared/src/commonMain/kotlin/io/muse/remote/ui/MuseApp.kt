@@ -568,6 +568,11 @@ private fun ConversationScene(
     var input by remember(state.sessionId) { mutableStateOf("") }
     var attachment by remember(state.sessionId) { mutableStateOf<PickedAttachment?>(null) }
     var attachmentMenu by remember { mutableStateOf(false) }
+    var showTools by remember(state.sessionId) { mutableStateOf(false) }
+    var sendAsSteer by remember(state.sessionId) { mutableStateOf(false) }
+    LaunchedEffect(state.turnId, state.working, attachment) {
+        if (state.turnId == null || !state.working || attachment != null) sendAsSteer = false
+    }
     var pendingSend by remember(state.sessionId) { mutableStateOf(false) }
     // Discard the draft ONLY after the backend acknowledges turn/start.
     // On failure, preserve both text and attached bytes for manual retry.
@@ -617,6 +622,12 @@ private fun ConversationScene(
                     maxLines = 1)
             }
             StreamChip(state.stream)
+            if (state.sessionReady) IconButton(onClick = {
+                controller.refreshSessionTools()
+                showTools = true
+            }) {
+                Icon(Icons.Default.Tune, contentDescription = "Herramientas de la sesión")
+            }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
         if (state.sessionReady) {
@@ -727,6 +738,16 @@ private fun ConversationScene(
             }
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
+        if (state.working && state.sessionReady) {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                FilterChip(selected = !sendAsSteer, onClick = { sendAsSteer = false },
+                    label = { Text("Enviar a la cola") })
+                FilterChip(selected = sendAsSteer, onClick = { sendAsSteer = true },
+                    enabled = state.turnId != null && attachment == null,
+                    label = { Text("Dirigir turno actual") })
+            }
+        }
         if (attachment != null) {
             val picked = attachment!!
             Surface(
@@ -803,7 +824,8 @@ private fun ConversationScene(
                 value = input,
                 onValueChange = { input = it },
                 modifier = Modifier.weight(1f),
-                placeholder = { Text(if (state.working) "Enviar a la cola…" else "Escribe a Muse…") },
+                placeholder = { Text(if (state.working && sendAsSteer) "Instrucción para el turno activo…"
+                    else if (state.working) "Enviar a la cola…" else "Escribí a Muse…") },
                 maxLines = 5, minLines = 1,
                 shape = RoundedCornerShape(20.dp),
                 keyboardOptions = KeyboardOptions.Default,
@@ -817,7 +839,9 @@ private fun ConversationScene(
                 onClick = {
                     followTail = true
                     pendingSend = true
-                    controller.send(input, attachment?.data)
+                    if (state.working && sendAsSteer && state.turnId != null &&
+                        attachment == null) controller.steer(input)
+                    else controller.send(input, attachment?.data)
                     scrollScope.launch {
                         if (count > 0) list.scrollToItem(count - 1)
                     }
@@ -831,6 +855,7 @@ private fun ConversationScene(
             }
         }
     }
+    if (showTools) SessionToolsDialog(state, controller, onDismiss = { showTools = false })
     ErrorPopup(state.error, controller::dismissError)
 }
 

@@ -244,6 +244,37 @@ data class ContributorStatus(
     val reason: String? = null,
 )
 
+data class SubscriptionSnapshot(
+    val tier: String,
+    val windowUsedPercent: Int,
+    val weeklyUsedPercent: Int,
+    val observedAtMs: Long,
+) {
+    companion object {
+        fun from(r: JsonObject): SubscriptionSnapshot? {
+            val u = r.obj("usage") ?: return null
+            val window = u.obj("window") ?: return null
+            val weekly = u.obj("weekly") ?: return null
+            return SubscriptionSnapshot(
+                u.string("tier").orEmpty(),
+                window["usedPercent"]?.jsonPrimitive?.intOrNull ?: return null,
+                weekly["usedPercent"]?.jsonPrimitive?.intOrNull ?: return null,
+                u["observedAtMs"]?.jsonPrimitive?.longOrNull ?: return null,
+            )
+        }
+    }
+}
+data class MuseSkill(val selector: String, val title: String, val description: String) {
+    companion object {
+        fun from(raw: JsonObject): MuseSkill? {
+            val selector = raw.string("selector") ?: return null
+            if (selector.isBlank()) return null
+            return MuseSkill(selector, raw.string("displayName") ?: selector,
+                raw.string("description").orEmpty())
+        }
+    }
+}
+val approvalModes = listOf("onRequest", "promptUnmatched", "denyUnmatched", "allowAll")
 enum class Screen { Login, Sessions, Conversation }
 
 data class MuseState(
@@ -277,6 +308,13 @@ data class MuseState(
     val modelSettingsLoading: Boolean = false,
     val modelSettingsSaving: Boolean = false,
     val modelSettingsError: String? = null,
+    val approvalMode: String? = null,
+    val toolsLoading: Boolean = false,
+    val toolsSaving: Boolean = false,
+    val toolsError: String? = null,
+    val usage: SubscriptionSnapshot? = null,
+    val skills: List<MuseSkill> = emptyList(),
+
     val workspace: String = "",
     val items: List<ChatItem> = emptyList(),
     val approvals: List<PendingApproval> = emptyList(),

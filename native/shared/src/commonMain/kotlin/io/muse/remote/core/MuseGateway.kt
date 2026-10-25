@@ -133,6 +133,53 @@ class MuseGateway(
         })
     }
 
+    /** No inference: reads the host's last cached usage observation only. */
+    suspend fun usageSnapshot(): SubscriptionSnapshot? =
+        SubscriptionSnapshot.from(rpc("usage/read"))
+
+    suspend fun listSkills(sessionId: String): List<MuseSkill> =
+        rpc("skill/list", buildJsonObject { put("sessionId", sessionId) })
+            .array("skills").orEmpty().mapNotNull { (it as? JsonObject)?.let(MuseSkill::from) }
+
+    suspend fun setApprovalMode(sessionId: String, mode: String) {
+        require(mode in approvalModes) { "Modo de aprobación inválido" }
+        rpc("session/setApprovalMode", buildJsonObject {
+            put("commandId", commandId())
+            put("sessionId", sessionId)
+            put("mode", mode)
+        })
+    }
+
+    suspend fun compactSession(sessionId: String) {
+        rpc("session/compact", buildJsonObject {
+            put("commandId", commandId())
+            put("sessionId", sessionId)
+        })
+    }
+
+    suspend fun forkSession(sessionId: String): String {
+        val response = rpc("session/fork", buildJsonObject {
+            put("commandId", commandId())
+            put("sessionId", sessionId)
+        })
+        return response.obj("session")?.string("sessionId")
+            ?: error("Muse no confirmó la nueva rama de la conversación.")
+    }
+
+    /** Exact-target steering prevents sending instructions into the wrong turn. */
+    suspend fun steer(sessionId: String, expectedTurnId: String, input: String) {
+        require(input.isNotBlank() && input.length <= 50000) { "Instrucción vacía o excesiva" }
+        require(expectedTurnId.isNotBlank()) { "No hay turno activo confirmado" }
+        rpc("turn/steer", buildJsonObject {
+            put("commandId", commandId())
+            put("sessionId", sessionId)
+            put("expectedTurnId", expectedTurnId)
+            putJsonArray("input") {
+                add(buildJsonObject { put("type", "text"); put("text", input) })
+            }
+        })
+    }
+
     suspend fun listAllSessions(
         maxPages: Int = 40,
         onPage: (pageNumber: Int, sessions: List<SessionSummary>) -> Unit = { _, _ -> },
