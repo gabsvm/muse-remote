@@ -488,7 +488,7 @@ async function handle(req, res) {
       const result = saveContributorSettings(body.enabled, body.confirmed === true);
       return sendJson(res, 200, { ok: true, ...result });
     } catch (e) {
-      return sendJson(res, 409, { ok: false, error: String(e.message || e) });
+      return sendJson(res, 409, { ok: false, error: 'Contributor no pudo actualizarse. Revisá el modo y la configuración local de Muse en la PC.' });
     }
   }
   if (req.method === 'GET' && pathname === '/api/command-id') {

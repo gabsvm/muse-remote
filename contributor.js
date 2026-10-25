@@ -1,62 +1,72 @@
 'use strict';
-// Contributor mode is a host-wide Muse Code privacy preference, not a model picker.
-// This helper reads/writes only the explicit boolean setting. It never invokes Muse.
+// Contributor is a host-wide Muse Code privacy preference (not a model ID).
+// The remote client can only toggle a saved, explicitly initialized boolean.
+// No CLI/model/API call is made and no other settings are returned to the client.
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
 
 const DEFAULT_SETTINGS = path.join(os.homedir(), '.config', 'muse', 'settings.json');
+const OVERRIDE_MESSAGE = 'Contributor está controlado por MUSE_CONTRIBUTOR_MODE en la PC.';
+const ERROR_MESSAGE = 'No se pudo leer la configuración local segura de Muse.';
+function loadSettings(settingsPath) {
+  // Keep the same open descriptor for fstat + read, avoiding a path check/read
+  // race. O_NOFOLLOW prevents symlink traversal on systems that support it.
+  const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0);
+  const fd = fs.openSync(settingsPath, flags);
+  try {
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > 256 * 1024) throw Error('INVALID_SETTINGS');
+    const raw = fs.readFileSync(fd, { encoding: 'utf8' });
+    const data = JSON.parse(raw);
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw Error('INVALID_SETTINGS');
+    if (data.contributor_mode_enabled !== undefined &&
+      typeof data.contributor_mode_enabled !== 'boolean') throw Error('INVALID_SETTINGS');
+    return data;
+  } finally { fs.closeSync(fd); }
+}
+
 function readContributorSettings(settingsPath = DEFAULT_SETTINGS, env = process.env) {
   if (env.MUSE_CONTRIBUTOR_MODE !== undefined) {
-    return { available: false, value: null, override: true, needsRestart: false,
-      reason: 'El proceso Muse está configurado con MUSE_CONTRIBUTOR_MODE; cambiá ese override en la PC.' };
+    return { available: false, value: null, override: true,
+      needsRestart: false, reason: OVERRIDE_MESSAGE };
   }
   try {
-    const stat = fs.lstatSync(settingsPath);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256 * 1024) {
-      throw Error('Configuración de Muse no es un archivo JSON local seguro.');
-    }
-    const data = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
-    const val = data.contributor_mode_enabled;
-    if (val !== undefined && typeof val !== 'boolean') throw Error('Estado Contributor inválido.');
-    return {
-      available: typeof val === 'boolean',
-      value: typeof val === 'boolean' ? val : null,
-      override: false,
-      needsRestart: false,
-      reason: typeof val === 'boolean' ? null :
-        'El modo Contributor no está inicializado; configuralo primero en Muse Code con /settings.',
-    };
+    const data = loadSettings(settingsPath);
+    const value = data.contributor_mode_enabled;
+    return { available: typeof value === 'boolean', value: typeof value === 'boolean' ? value : null,
+      override: false, needsRestart: false,
+      reason: typeof value === 'boolean' ? null :
+        'Contributor no está inicializado: abrí /settings en Muse Code desde la PC.' };
   } catch (e) {
-    return { available: false, value: null, override: false, needsRestart: false,
-      reason: e.code === 'ENOENT' ? 'No existe configuración de Muse. Abrí /settings en la PC.' :
-        'No se pudo leer la configuración segura de Muse: ' + e.message };
+    return { available: false, value: null, override: false,
+      needsRestart: false, reason: e.code === 'ENOENT' ?
+        'Falta la configuración de Muse; abrí /settings desde la PC.' : ERROR_MESSAGE };
   }
 }
 
 function saveContributorSettings(enabled, confirmed, settingsPath = DEFAULT_SETTINGS, env = process.env) {
-  if (typeof enabled !== 'boolean') throw Error('Se requiere un estado booleano.');
-  if (enabled && confirmed !== true) throw Error('Antes de activar Contributor aceptá expresamente el uso de datos para entrenamiento.');
-  const status = readContributorSettings(settingsPath, env);
-  if (!status.available || status.override) throw Error(status.reason || 'Modo no disponible.');
-  const data = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+  if (typeof enabled !== 'boolean') throw Error('Se requiere on/off.');
+  if (enabled && confirmed !== true) throw Error('Antes de activar Contributor, aceptá expresamente el uso de datos para entrenamiento.');
+  if (env.MUSE_CONTRIBUTOR_MODE !== undefined) throw Error(OVERRIDE_MESSAGE);
+  let data;
+  try { data = loadSettings(settingsPath); }
+  catch { throw Error(ERROR_MESSAGE); }
+  if (typeof data.contributor_mode_enabled !== 'boolean')
+    throw Error('Inicializá primero el modo Contributor en /settings de Muse Code.');
   if (data.contributor_mode_enabled === enabled) return {
-    available: true, value: enabled, override: false, needsRestart: false,
-    reason: null,
+    available: true, value: enabled, override: false, needsRestart: false, reason: null,
   };
   data.contributor_mode_enabled = enabled;
-  // Explicit consent is recorded only when the owner turns it on.
   if (enabled) data.contributor_mode_disclosure_acknowledged = true;
-  const file = settingsPath + '.muse-remote-' + crypto.randomBytes(5).toString('hex');
+  const tmp = settingsPath + '.muse-remote-' + crypto.randomBytes(5).toString('hex');
   try {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
-    fs.renameSync(file, settingsPath);
-  } finally {
-    try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch {}
-  }
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { mode: 0o600, flag: 'wx' });
+    fs.renameSync(tmp, settingsPath);
+  } catch { throw Error('No se pudo guardar la preferencia Contributor. Revisá los permisos en la PC.'); }
+  finally { try { fs.unlinkSync(tmp); } catch {} }
   return { available: true, value: enabled, override: false, needsRestart: true,
-    reason: 'Guardado en la PC. Reiniciá Muse Remote y Muse Code para aplicar el cambio. ' +
-      'No se afirma que el proceso actual haya cambiado.' };
+    reason: 'Guardado en la PC. Reiniciá Muse Remote para aplicar el cambio al proceso actual.' };
 }
 module.exports = { readContributorSettings, saveContributorSettings };
