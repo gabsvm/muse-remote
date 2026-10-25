@@ -8,7 +8,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 
 const DEFAULT_SETTINGS = path.join(os.homedir(), '.config', 'muse', 'settings.json');
-const OVERRIDE_MESSAGE = 'Contributor está controlado por MUSE_CONTRIBUTOR_MODE en la PC.';
+const OVERRIDE_MESSAGE = 'El override MUSE_CONTRIBUTOR_MODE controla Contributor desde la PC.';
 const ERROR_MESSAGE = 'No se pudo leer la configuración local segura de Muse.';
 function loadSettings(settingsPath) {
   // Keep the same open descriptor for fstat + read, avoiding a path check/read
