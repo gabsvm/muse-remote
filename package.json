@@ -1,6 +1,6 @@
 {
   "name": "muse-remote",
-  "version": "0.2.0-beta.1",
+  "version": "0.2.0-beta.3",
   "description": "Control remoto local (PWA mobile-first) para Muse Code CLI via protocolo MSP oficial (muse serve stdio). Sin API keys PAYG.",
   "type": "commonjs",
   "engines": {
@@ -9,7 +9,7 @@
   "scripts": {
     "start": "node server.js",
     "tunnel": "node scripts/tunnel.js",
-    "test": "node --test test/push.test.js test/tunnel.test.js test/client.test.js test/security.test.js test/bootstrap-security.test.js test/rotation.test.js test/timeout.test.js test/lan.test.js test/upload.test.js",
+    "test": "node --test test/push.test.js test/tunnel.test.js test/client.test.js test/security.test.js test/bootstrap-security.test.js test/rotation.test.js test/contributor.test.js test/contributor-http.test.js test/timeout.test.js test/lan.test.js test/upload.test.js",
     "package:windows": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/release/package-windows.ps1",
     "test:e2e": "playwright test",
     "lan:pair": "node scripts/lan-pair.js",

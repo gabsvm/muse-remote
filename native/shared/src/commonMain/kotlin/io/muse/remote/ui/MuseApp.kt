@@ -247,13 +247,27 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
     var search by remember { mutableStateOf("") }
     var createDialog by remember { mutableStateOf(false) }
     var showHidden by remember { mutableStateOf(false) }
+    var projectFilter by remember { mutableStateOf("all") }
+    var createProjectDialog by remember { mutableStateOf(false) }
+    var manageProjects by remember { mutableStateOf(false) }
+    var contributorDialog by remember { mutableStateOf(false) }
 
+    LaunchedEffect(state.projects) {
+        if (projectFilter !in setOf("all", "pinned", "unassigned") &&
+            state.projects.none { it.id == projectFilter }) projectFilter = "all"
+    }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Muse Remote", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text("Estación conectada", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            }
+            IconButton(onClick = {
+                controller.refreshContributor()
+                contributorDialog = true
+            }) {
+                Icon(Icons.Default.Settings, contentDescription = "Ajustes de Contributor")
             }
             IconButton(onClick = controller::refreshSessions) {
                 Icon(Icons.Default.Refresh, contentDescription = "Actualizar sesiones")
@@ -292,7 +306,10 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
+            ProjectFilterStrip(state, projectFilter, { projectFilter = it },
+                { createProjectDialog = true }, { manageProjects = true })
+            Spacer(Modifier.height(6.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 FilterChip(selected = !showHidden, onClick = { showHidden = false },
@@ -306,11 +323,20 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.height(10.dp))
-            val shown = remember(state.sessions, search, state.hiddenSessionIds, showHidden) {
+            val shown = remember(state.sessions, search, state.hiddenSessionIds,
+                showHidden, state.pinnedSessionIds, state.projectAssignments, projectFilter) {
                 state.sessions.filter {
-                    (it.id in state.hiddenSessionIds) == showHidden &&
+                    val inScope = when (projectFilter) {
+                        "all" -> true
+                        "pinned" -> it.id in state.pinnedSessionIds
+                        "unassigned" -> state.projectAssignments[it.id] == null
+                        else -> state.projectAssignments[it.id] == projectFilter
+                    }
+                    (it.id in state.hiddenSessionIds) == showHidden && inScope &&
                         (it.title.contains(search, true) || it.workspace.contains(search, true))
-                }
+                }.sortedWith(compareByDescending<SessionSummary> {
+                    it.id in state.pinnedSessionIds
+                }.thenByDescending { it.updatedAt })
             }
             if (state.sessionsLoading) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -361,6 +387,12 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                         SessionRow(
                             session = session,
                             hidden = showHidden,
+                            pinned = session.id in state.pinnedSessionIds,
+                            project = state.projects.firstOrNull {
+                                it.id == state.projectAssignments[session.id] },
+                            projects = state.projects,
+                            onPin = { controller.togglePinned(session.id) },
+                            onMove = { controller.assignSession(session.id, it) },
                             onClick = { controller.openSession(session.id) },
                             onHideOrRestore = {
                                 if (showHidden) controller.restoreSession(session.id)
@@ -372,14 +404,34 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
             }
         }
     }
+    if (contributorDialog) ContributorSettingsDialog(state, controller,
+        onDismiss = { contributorDialog = false })
+    if (createProjectDialog) ProjectEditor(
+        project = null, onDismiss = { createProjectDialog = false },
+        onSave = { name, workspace ->
+            controller.createProject(name, workspace)
+            createProjectDialog = false
+        })
+    if (manageProjects) ProjectManager(state, controller, onDismiss = { manageProjects = false })
     if (createDialog) {
         var workspace by remember { mutableStateOf("") }
+        var projectId by remember {
+            mutableStateOf<String?>(state.projects.firstOrNull { it.id == projectFilter }?.id)
+        }
+
         AlertDialog(
             onDismissRequest = { createDialog = false },
             title = { Text("Nueva sesión") },
             text = {
                 Column {
                     Text("Indica la carpeta de trabajo de tu PC. Déjala vacía para una sesión sin carpeta.")
+                    Spacer(Modifier.height(12.dp))
+                    Text("Agregar al proyecto", style = MaterialTheme.typography.labelMedium)
+                    ProjectPicker(state.projects, projectId, { chosen ->
+                        projectId = chosen
+                        val project = state.projects.firstOrNull { it.id == chosen }
+                        if (project != null && workspace.isBlank()) workspace = project.workspace
+                    })
                     Spacer(Modifier.height(12.dp))
                     OutlinedTextField(
                         value = workspace, onValueChange = { workspace = it },
@@ -390,7 +442,11 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                 }
             },
             confirmButton = {
-                TextButton(onClick = { createDialog = false; controller.createSession(workspace) }) { Text("Crear") }
+                TextButton(onClick = {
+                    createDialog = false
+                    val project = state.projects.firstOrNull { it.id == projectId }
+                    controller.createSession(workspace.ifBlank { project?.workspace.orEmpty() }, projectId)
+                }) { Text("Crear") }
             },
             dismissButton = { TextButton(onClick = { createDialog = false }) { Text("Cancelar") } },
         )
@@ -402,11 +458,34 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
 private fun SessionRow(
     session: SessionSummary,
     hidden: Boolean,
+    pinned: Boolean,
+    project: RemoteProject?,
+    projects: List<RemoteProject>,
+    onPin: () -> Unit,
+    onMove: (String?) -> Unit,
     onClick: () -> Unit,
     onHideOrRestore: () -> Unit,
 ) {
     val isRunning = session.status == "running"
     var menuExpanded by remember(session.id) { mutableStateOf(false) }
+    var moveDialog by remember(session.id) { mutableStateOf(false) }
+    if (moveDialog) {
+        var assignment by remember(session.id) { mutableStateOf(project?.id) }
+        AlertDialog(onDismissRequest = { moveDialog = false },
+            title = { Text("Mover a proyecto") },
+            text = {
+                Column {
+                    Text(session.title, maxLines = 2)
+                    Spacer(Modifier.height(12.dp))
+                    ProjectPicker(projects, assignment, { assignment = it })
+                }
+            },
+            confirmButton = { TextButton(onClick = {
+                onMove(assignment)
+                moveDialog = false
+            }) { Text("Guardar") } },
+            dismissButton = { TextButton(onClick = { moveDialog = false }) { Text("Cancelar") } })
+    }
     Surface(
         onClick = onClick, tonalElevation = 1.dp,
         shape = RoundedCornerShape(22.dp), color = MaterialTheme.colorScheme.surface,
@@ -419,8 +498,20 @@ private fun SessionRow(
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(session.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (pinned) {
+                        Icon(Icons.Default.PushPin, contentDescription = "Chat fijado",
+                            modifier = Modifier.size(15.dp), tint = MaterialTheme.colorScheme.primary)
+                        Spacer(Modifier.width(5.dp))
+                    }
+                    Text(session.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold)
+                }
+                if (project != null) {
+                    Text(project.name, style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary, maxLines = 1)
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(session.workspace.substringAfterLast('\\').substringAfterLast('/').ifBlank { "Sin carpeta" },
                     color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall,
@@ -437,6 +528,16 @@ private fun SessionRow(
                 }
                 DropdownMenu(expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text(if (pinned) "Desfijar chat" else "Fijar arriba") },
+                        leadingIcon = { Icon(Icons.Default.PushPin, null) },
+                        onClick = { menuExpanded = false; onPin() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Mover a proyecto") },
+                        leadingIcon = { Icon(Icons.Default.Folder, null) },
+                        onClick = { menuExpanded = false; moveDialog = true },
+                    )
                     DropdownMenuItem(
                         text = { Text(if (hidden) "Restaurar a la lista" else "Ocultar en este dispositivo") },
                         leadingIcon = {

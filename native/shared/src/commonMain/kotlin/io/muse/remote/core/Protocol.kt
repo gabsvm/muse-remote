@@ -37,6 +37,12 @@ data class ServerCredentials(
     }
 }
 
+data class RemoteProject(
+    val id: String,
+    val name: String,
+    val workspace: String = "",
+)
+
 interface CredentialsStore {
     fun read(): ServerCredentials?
     fun save(value: ServerCredentials)
@@ -44,6 +50,13 @@ interface CredentialsStore {
     fun recentSession(): String?
     fun saveRecentSession(id: String?)
     // A reversible local filter; MSP has no session/delete operation.
+    /** Local organizer metadata; never deletes or mutates an upstream MSP session. */
+    fun projects(): List<RemoteProject> = emptyList()
+    fun saveProjects(value: List<RemoteProject>) {}
+    fun projectAssignments(): Map<String, String> = emptyMap()
+    fun saveProjectAssignments(value: Map<String, String>) {}
+    fun pinnedSessionIds(): Set<String> = emptySet()
+    fun savePinnedSessionIds(value: Set<String>) {}
     fun hiddenSessionIds(): Set<String> = emptySet()
     fun hideSession(id: String) {}
     fun restoreSession(id: String) {}
@@ -52,12 +65,21 @@ interface CredentialsStore {
 class MemoryCredentialsStore : CredentialsStore {
     private var credentials: ServerCredentials? = null
     private var session: String? = null
+    private val projectList = mutableListOf<RemoteProject>()
+    private val assignments = mutableMapOf<String, String>()
+    private val pinned = mutableSetOf<String>()
     private val hidden = mutableSetOf<String>()
     override fun read() = credentials
     override fun save(value: ServerCredentials) { credentials = value }
     override fun clear() { credentials = null; session = null }
     override fun recentSession() = session
     override fun saveRecentSession(id: String?) { session = id }
+    override fun projects(): List<RemoteProject> = projectList.toList()
+    override fun saveProjects(value: List<RemoteProject>) { projectList.clear(); projectList.addAll(value) }
+    override fun projectAssignments(): Map<String, String> = assignments.toMap()
+    override fun saveProjectAssignments(value: Map<String, String>) { assignments.clear(); assignments.putAll(value) }
+    override fun pinnedSessionIds(): Set<String> = pinned.toSet()
+    override fun savePinnedSessionIds(value: Set<String>) { pinned.clear(); pinned.addAll(value) }
     override fun hiddenSessionIds(): Set<String> = hidden.toSet()
     override fun hideSession(id: String) { hidden.add(id) }
     override fun restoreSession(id: String) { hidden.remove(id) }
@@ -215,6 +237,13 @@ data class MuseModel(val id: String, val label: String, val isActive: Boolean) {
     }
 }
 val reasoningEffortLevels = listOf("none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+data class ContributorStatus(
+    val available: Boolean = false,
+    val value: Boolean? = null,
+    val needsRestart: Boolean = false,
+    val reason: String? = null,
+)
+
 enum class Screen { Login, Sessions, Conversation }
 
 data class MuseState(
@@ -227,6 +256,13 @@ data class MuseState(
     val sessionsLoaded: Boolean = false,
     val sessionsPageCount: Int = 0,
     val sessionsError: String? = null,
+    val projects: List<RemoteProject> = emptyList(),
+    val projectAssignments: Map<String, String> = emptyMap(),
+    val pinnedSessionIds: Set<String> = emptySet(),
+    val contributor: ContributorStatus = ContributorStatus(),
+    val contributorLoading: Boolean = false,
+    val contributorSaving: Boolean = false,
+
     val hiddenSessionIds: Set<String> = emptySet(),
     val sessionReady: Boolean = false,
     val sessionBusyElsewhere: Boolean = false,

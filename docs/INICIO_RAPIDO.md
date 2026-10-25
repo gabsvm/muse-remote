@@ -29,3 +29,13 @@ Las APK firmadas para QA deben salir de un workflow confiable. La publicación `
 - **¿Cómo diagnostico?** Ejecutá `03_Diagnostico.cmd`; no necesitás publicar logs con datos privados.
 
 Más detalles: [compatibilidad](COMPATIBILITY.md), [seguridad](../SECURITY.md), [proyecto](../README.md).
+## Proyectos, chats fijados y Contributor (0.2.0-beta.3)
+
+- En **Tus sesiones**, tocá **+ Proyecto** para crear una colección con nombre y carpeta de trabajo opcional de la PC.
+- Tocá el proyecto para filtrar sus conversaciones. El menú de cada chat permite **Fijar arriba**, **Desfijar**, **Mover a proyecto**, **Ocultar** o restaurar.
+- Los chats fijados se ordenan primero. **Administrar** permite editar el nombre/carpeta y quitar la agrupación. Quitar un proyecto **nunca elimina las sesiones de Muse**.
+- Al crear una conversación desde la lista, elegí su proyecto; si no introducís otra carpeta, utiliza la carpeta predeterminada de ese proyecto en la PC.
+- **Importante:** esta primera versión del organizador se guarda en preferencias locales privadas de **esta instalación Android**. No sincroniza con la PWA ni otros teléfonos. La carpeta del proyecto controla **únicamente las sesiones nuevas**, no mueve archivos ni cambia el workspace de sesiones previas. Desinstalar la app borra esta organización local.
+- El icono de ajustes de la lista abre el estado **Contributor** guardado en Muse Code de esa PC. **No es un ajuste por chat ni por modelo.** Activarlo requiere consentimiento explícito porque Meta podrá utilizar contenido de conversaciones, código y archivos para entrenamiento. Ver [documentación oficial](https://dev.meta.ai/docs/muse-code/subscriptions).
+- Para cambiar Contributor desde la APK, el servidor Windows debe tener la versión 0.2.0-beta.3 o superior. Se guarda en el archivo de preferencias real del CLI y se muestra la necesidad de **reiniciar Muse Remote en la PC**; el proceso existente puede mantener el estado previo. La configuración con overrides de entorno o cuentas gestionadas puede bloquear el cambio.
+- Si solo actualizás Android, los proyectos y pines funcionan, pero el panel Contributor indicará que el servidor de tu PC necesita actualización.

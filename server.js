@@ -11,6 +11,17 @@ const { spawn } = require('child_process');
 const { URL } = require('url');
 const { PushStore, pushForMsp } = require('./push');
 const { writeUpload, readUploadBody } = require('./uploads');
+const { readContributorSettings, saveContributorSettings } = require('./contributor');
+// A cached boot snapshot makes the pending-restart warning survive UI refreshes.
+const CONTRIBUTOR_BOOT_VALUE = readContributorSettings().value;
+function contributorReadStatus() {
+  const current = readContributorSettings();
+  if (current.available && current.value !== CONTRIBUTOR_BOOT_VALUE) {
+    return { ...current, needsRestart: true,
+      reason: 'La preferencia cambió desde el arranque. Reiniciá Muse Remote en la PC para aplicarla.' };
+  }
+  return current;
+}
 
 // Solo loopback. Nunca 0.0.0.0 ni exposicion publica (el acceso remoto lo
 // proporciona el usuario con Tailscale Serve por fuera de esta app).
@@ -198,7 +209,7 @@ class MspHost {
     child.on('error', (e) => { this.lastError = String(e).slice(0, 300); });
     // Handshake SS1.4.1: initialize -> initialized (notificacion).
     this.rawRequest('initialize', {
-      clientInfo: { name: 'muse_remote', version: '0.2.0-beta.1' },
+      clientInfo: { name: 'muse_remote', version: '0.2.0-beta.3' },
       // userShell: autoriza session/userShell; userInputDialogs: declara que
       // la PWA sí renderiza y responde prompts interactivos del modelo.
       capabilities: { requestedCapabilities: ['userShell'], userInputDialogs: true },
@@ -462,7 +473,23 @@ async function handle(req, res) {
   const pathname = u.pathname;
 
   if (req.method === 'GET' && pathname === '/api/health') {
-    return sendJson(res, 200, { ok: true, mspReady: msp.ready, ...(authorized(req) ? { serverInfo: msp.serverInfo } : {}), version: '0.2.0-beta.1', features: { fileUpload: true } });
+    return sendJson(res, 200, { ok: true, mspReady: msp.ready, ...(authorized(req) ? { serverInfo: msp.serverInfo } : {}), version: '0.2.0-beta.3', features: { fileUpload: true } });
+  }
+  if (pathname === '/api/contributor' && req.method === 'GET') {
+    if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    return sendJson(res, 200, { ok: true, ...contributorReadStatus() });
+  }
+  if (pathname === '/api/contributor' && req.method === 'POST') {
+    if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    let body;
+    try { body = JSON.parse(await readBody(req, 1024)); }
+    catch (e) { return sendJson(res, isBodyTooLarge(e) ? 413 : 400, { ok: false, error: 'bad json' }); }
+    try {
+      const result = saveContributorSettings(body.enabled, body.confirmed === true);
+      return sendJson(res, 200, { ok: true, ...result });
+    } catch (e) {
+      return sendJson(res, 409, { ok: false, error: 'Contributor no pudo actualizarse. Revisá el modo y la configuración local de Muse en la PC.' });
+    }
   }
   if (req.method === 'GET' && pathname === '/api/command-id') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
