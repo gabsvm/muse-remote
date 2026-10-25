@@ -41,6 +41,8 @@ class MuseController(
     private var listJob: Job? = null
     private var modelJob: Job? = null
     private var settingsJob: Job? = null
+    private var toolsJob: Job? = null
+    private var actionJob: Job? = null
     private var contributorJob: Job? = null
 
     private var listSequence = 0L
@@ -304,6 +306,8 @@ class MuseController(
                 workspace = known?.workspace.orEmpty(),
                 models = emptyList(), activeModelId = known?.model?.takeIf(String::isNotBlank),
                 reasoningEffort = null, modelSettingsLoading = false,
+                approvalMode = null, toolsLoading = false, toolsSaving = false,
+                toolsError = null, usage = null, skills = emptyList(),
                 modelSettingsSaving = false, modelSettingsError = null,
                 items = emptyList(), approvals = emptyList(), questions = emptyList(),
                 loading = true, sessionReady = false, sessionBusyElsewhere = false,
@@ -363,6 +367,8 @@ class MuseController(
                         activeModelId = session?.string("modelId")
                             ?: session?.obj("model")?.string("modelId") ?: it.activeModelId,
                         reasoningEffort = session?.string("reasoningEffort"),
+                        approvalMode = session?.obj("approvalMode")?.string("mode"),
+                        turnId = session?.string("activeTurnId"),
                         working = session?.string("status") == "running",
                         stream = "Conectando directo…",
                         viewCursor = result.string("viewCursor"), error = null,
@@ -428,6 +434,8 @@ class MuseController(
                 loading = false, sending = false,
                 models = emptyList(), activeModelId = null, reasoningEffort = null,
                 modelSettingsLoading = false, modelSettingsSaving = false, modelSettingsError = null,
+                approvalMode = null, toolsLoading = false, toolsSaving = false,
+                toolsError = null, usage = null, skills = emptyList(),
                 turnId = null, viewCursor = null, stream = "PC conectada", error = null)
         }
         refreshSessions()
@@ -537,6 +545,123 @@ class MuseController(
                     it.copy(sending = false,
                         error = "No se confirmó el envío: ${t.message}. " +
                             "Conserva el adjunto y comprueba el historial antes de reintentar.")
+                }
+            }
+        }
+    }
+
+    /** Target exactly the turn currently observed; never steer a different turn. */
+    fun steer(text: String) {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        val turn = c.turnId
+        if (!c.sessionReady || !c.working || turn == null || c.sending || text.isBlank()) {
+            reportError("No se confirmó un turno activo; enviá el mensaje a la cola.")
+            return
+        }
+        val seq = generation
+        mutable.update { it.copy(sending = true, error = null) }
+        scope.launch {
+            try {
+                gateway.steer(sid, turn, text.trim())
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(sending = false) }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(sending = false,
+                        error = "No se pudo dirigir el turno: " + e.message) }
+            }
+        }
+    }
+
+    /** Reads cached usage and the session's invocable skill catalog. No model call. */
+    fun refreshSessionTools() {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        if (!c.sessionReady || c.toolsSaving) return
+        val seq = generation
+        toolsJob?.cancel()
+        mutable.update { it.copy(toolsLoading = true, toolsError = null) }
+        toolsJob = scope.launch {
+            var usage: SubscriptionSnapshot? = null
+            var skills = emptyList<MuseSkill>()
+            val errors = mutableListOf<String>()
+            try { usage = gateway.usageSnapshot() }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { errors.add("No se pudo consultar uso.") }
+            try { skills = gateway.listSkills(sid) }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { errors.add("No se pudo consultar skills.") }
+            if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                it.copy(usage = usage, skills = skills, toolsLoading = false,
+                    toolsError = errors.takeIf { x -> x.isNotEmpty() }?.joinToString(" "))
+            }
+        }
+    }
+
+    fun setApprovalMode(mode: String) {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        if (!c.sessionReady || c.working || c.sending || c.toolsSaving ||
+            mode !in approvalModes) return
+        val seq = generation
+        mutable.update { it.copy(toolsSaving = true, toolsError = null) }
+        actionJob = scope.launch {
+            try {
+                gateway.setApprovalMode(sid, mode)
+                if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                    it.copy(approvalMode = mode, toolsSaving = false)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                    it.copy(toolsSaving = false, toolsError = "Muse rechazó los permisos: " + e.message)
+                }
+            }
+        }
+    }
+
+    fun forkCurrentSession() {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        if (!c.sessionReady || c.working || c.sending || c.toolsSaving) return
+        val seq = generation
+        mutable.update { it.copy(toolsSaving = true, toolsError = null) }
+        actionJob = scope.launch {
+            try {
+                val id = gateway.forkSession(sid)
+                if (seq != generation || mutable.value.sessionId != sid) return@launch
+                mutable.value.projectAssignments[sid]?.let { assignSession(id, it) }
+                mutable.update { it.copy(toolsSaving = false) }
+                openSession(id)
+                refreshSessions()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                    it.copy(toolsSaving = false, toolsError = "No se pudo bifurcar: " + e.message)
+                }
+            }
+        }
+    }
+
+    fun compactCurrentSession() {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        if (!c.sessionReady || c.working || c.sending || c.toolsSaving) return
+        val seq = generation
+        mutable.update { it.copy(toolsSaving = true, toolsError = null) }
+        actionJob = scope.launch {
+            try {
+                gateway.compactSession(sid)
+                if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                    it.copy(toolsSaving = false, toolsError = null,
+                        stream = "Compactación iniciada en Muse")
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                    it.copy(toolsSaving = false, toolsError = "Compactación rechazada: " + e.message)
                 }
             }
         }
@@ -652,6 +777,8 @@ class MuseController(
             val session = response.obj("session")
             if (session != null) mutable.update {
                 it.copy(working = session.string("status") == "running",
+                    turnId = session.string("activeTurnId"),
+                    approvalMode = session.obj("approvalMode")?.string("mode") ?: it.approvalMode,
                     sessionTitle = session.string("name") ?: it.sessionTitle)
             }
             if (lastEvent.elapsedNow().inWholeSeconds > 35) {
@@ -785,7 +912,7 @@ class MuseController(
 
     private fun cancelConversation() {
         openJob?.cancel(); streamJob?.cancel(); syncJob?.cancel(); watchdogJob?.cancel()
-        modelJob?.cancel(); settingsJob?.cancel(); contributorJob?.cancel()
+        modelJob?.cancel(); settingsJob?.cancel(); contributorJob?.cancel(); toolsJob?.cancel(); actionJob?.cancel()
         openJob = null; streamJob = null; syncJob = null; watchdogJob = null
     }
 
