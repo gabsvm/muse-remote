@@ -133,6 +133,23 @@ class MuseGateway(
         })
     }
 
+    /**
+     * Explicit on-demand CLI quota read. The PC runs \`muse usage --json\`,
+     * documented as no model turn, rate-capped by the bridge.
+     */
+    suspend fun diagnoseQuota(): String {
+        val c = auth()
+        val response = client.get(c.base + "/api/usage-diagnostics") {
+            header(HttpHeaders.Authorization, "Bearer " + c.token)
+        }
+        if (response.status.value == 404)
+            return "El servidor Windows es anterior a la beta.5. Actualizá el puente para consultar la cuota."
+        if (!response.status.isSuccess()) return "Muse Code no pudo consultar la cuota (HTTP " +
+            response.status.value + "). Revisá el CLI en la PC."
+        val body = parse(response.bodyAsText())
+        return body.string("message") ?: "Muse no proporcionó un estado de cuota."
+    }
+
     /** No inference: reads the host's last cached usage observation only. */
     suspend fun usageSnapshot(): SubscriptionSnapshot? =
         SubscriptionSnapshot.from(rpc("usage/read"))

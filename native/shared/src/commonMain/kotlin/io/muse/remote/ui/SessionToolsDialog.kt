@@ -49,8 +49,14 @@ internal fun SessionToolsDialog(state: MuseState, controller: MuseController, on
                         style = MaterialTheme.typography.labelSmall)
                 }
                 TextButton(onClick = controller::refreshSessionTools, enabled = !state.toolsLoading) {
-                    Text("Actualizar datos")
+                    Text("Releer datos observados")
                 }
+                OutlinedButton(onClick = controller::diagnoseQuota,
+                    enabled = !state.usageChecking) {
+                    Text("Consultar cuota desde Muse Code")
+                }
+                if (state.usageChecking) LinearProgressIndicator(Modifier.fillMaxWidth())
+                state.usageDiagnosis?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 HorizontalDivider()
                 Text("Aprobaciones", style = MaterialTheme.typography.titleSmall)
                 Text("Actual: " + (state.approvalMode?.let(::approvalName) ?: "No confirmado"),

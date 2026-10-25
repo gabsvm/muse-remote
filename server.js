@@ -12,6 +12,7 @@ const { URL } = require('url');
 const { PushStore, pushForMsp } = require('./push');
 const { writeUpload, readUploadBody } = require('./uploads');
 const { readContributorSettings, saveContributorSettings } = require('./contributor');
+const { usageDiagnostics } = require('./usage-diagnostics');
 // A cached boot snapshot makes the pending-restart warning survive UI refreshes.
 const CONTRIBUTOR_BOOT_VALUE = readContributorSettings().value;
 function contributorReadStatus() {
@@ -473,7 +474,16 @@ async function handle(req, res) {
   const pathname = u.pathname;
 
   if (req.method === 'GET' && pathname === '/api/health') {
-    return sendJson(res, 200, { ok: true, mspReady: msp.ready, ...(authorized(req) ? { serverInfo: msp.serverInfo } : {}), version: '0.2.0-beta.3', features: { fileUpload: true } });
+    return sendJson(res, 200, { ok: true, mspReady: msp.ready, ...(authorized(req) ? { serverInfo: msp.serverInfo } : {}), version: '0.2.0-beta.5', features: { fileUpload: true, contributor: true, usageDiagnostics: true } });
+  }
+  if (pathname === '/api/usage-diagnostics' && req.method === 'GET') {
+    if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });
+    try {
+      return sendJson(res, 200, { ok: true, ...(await usageDiagnostics()) });
+    } catch {
+      return sendJson(res, 503, { ok: false,
+        error: 'No se pudo consultar la cuota desde Muse Code en la PC.' });
+    }
   }
   if (pathname === '/api/contributor' && req.method === 'GET') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });

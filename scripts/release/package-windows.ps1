@@ -6,12 +6,12 @@ $stageRoot=Join-Path $env:TEMP ('muse-remote-beta-'+[Guid]::NewGuid().ToString('
 $Stage=Join-Path $stageRoot 'muse-remote-windows'
 New-Item -ItemType Directory -Path $Stage -Force | Out-Null
 # Deliberate file selection: no developer working data or unlisted files.
-$Paths=@('package.json','package-lock.json','README.md','SECURITY.md','CONTRIBUTING.md','CODE_OF_CONDUCT.md','GOVERNANCE.md','LICENSE','ARCHITECTURE.md','THIRD_PARTY_NOTICES.md','server.js','lan.js','push.js','uploads.js','contributor.js')
+$Paths=@('package.json','package-lock.json','README.md','SECURITY.md','CONTRIBUTING.md','CODE_OF_CONDUCT.md','GOVERNANCE.md','LICENSE','ARCHITECTURE.md','THIRD_PARTY_NOTICES.md','server.js','lan.js','push.js','uploads.js','contributor.js','usage-diagnostics.js')
 $Paths+=@('public/app.js','public/icon.svg','public/index.html','public/manifest.webmanifest','public/styles.css','public/sw.js','public/theme.js')
 $Paths+=@('scripts/lan-pair.js','scripts/tunnel.js','scripts/setup-lan.ps1','scripts/setup-android-qa-signing.ps1','scripts/windows/01_Emparejar_LAN.cmd','scripts/windows/02_Ver_estado.cmd','scripts/windows/03_Reiniciar_servidor.cmd','scripts/windows/_servidor-lan.cmd','scripts/windows/muse-control.ps1','scripts/windows/README.md','scripts/windows/setup-user.ps1','scripts/windows/01_Instalar.cmd','scripts/windows/02_Iniciar_PWA.cmd','scripts/windows/03_Diagnostico.cmd','scripts/windows/04_Revocar_dispositivos.cmd','scripts/security/rotate-token.js','scripts/release/package-windows.ps1')
 $Paths+=@('native/README.md','native/LAN.md','native/QA_SIGNING.md')
 $Paths+=@(Get-ChildItem (Join-Path $Root 'docs') -File -Filter '*.md' | ForEach-Object {'docs/'+$_.Name})
-$Paths+=@('test/push.test.js','test/tunnel.test.js','test/client.test.js','test/security.test.js','test/bootstrap-security.test.js','test/rotation.test.js','test/contributor.test.js','test/contributor-http.test.js','test/timeout.test.js','test/lan.test.js','test/upload.test.js','test/msp.test.js','test/api.test.js','test/image.test.js')
+$Paths+=@('test/push.test.js','test/tunnel.test.js','test/client.test.js','test/security.test.js','test/bootstrap-security.test.js','test/rotation.test.js','test/contributor.test.js','test/contributor-http.test.js','test/usage-diagnostics.test.js','test/timeout.test.js','test/lan.test.js','test/upload.test.js','test/msp.test.js','test/api.test.js','test/image.test.js')
 foreach($rel in $Paths){
   $src=Join-Path $Root $rel
   if(-not(Test-Path -LiteralPath $src)){throw ('Missing required package file '+$rel)}

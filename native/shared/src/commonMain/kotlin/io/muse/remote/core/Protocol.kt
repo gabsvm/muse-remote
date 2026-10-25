@@ -313,6 +313,9 @@ data class MuseState(
     val toolsSaving: Boolean = false,
     val toolsError: String? = null,
     val usage: SubscriptionSnapshot? = null,
+    val usageDiagnosis: String? = null,
+    val usageChecking: Boolean = false,
+
     val skills: List<MuseSkill> = emptyList(),
 
     val workspace: String = "",

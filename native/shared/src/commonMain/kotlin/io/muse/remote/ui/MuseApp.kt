@@ -297,7 +297,15 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                     Text("Nueva")
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            TextButton(onClick = {
+                controller.refreshContributor()
+                contributorDialog = true
+            }) {
+                Icon(Icons.Default.Settings, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Modo Contributor · ajustes de la PC")
+            }
+            Spacer(Modifier.height(4.dp))
             OutlinedTextField(
                 value = search, onValueChange = { search = it },
                 placeholder = { Text("Buscar por nombre o carpeta") },

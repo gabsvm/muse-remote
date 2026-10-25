@@ -308,6 +308,7 @@ class MuseController(
                 reasoningEffort = null, modelSettingsLoading = false,
                 approvalMode = null, toolsLoading = false, toolsSaving = false,
                 toolsError = null, usage = null, skills = emptyList(),
+                usageDiagnosis = null, usageChecking = false,
                 modelSettingsSaving = false, modelSettingsError = null,
                 items = emptyList(), approvals = emptyList(), questions = emptyList(),
                 loading = true, sessionReady = false, sessionBusyElsewhere = false,
@@ -597,6 +598,21 @@ class MuseController(
                 it.copy(usage = usage, skills = skills, toolsLoading = false,
                     toolsError = errors.takeIf { x -> x.isNotEmpty() }?.joinToString(" "))
             }
+        }
+    }
+
+    fun diagnoseQuota() {
+        val current = mutable.value
+        val sid = current.sessionId ?: return
+        if (!current.sessionReady || current.usageChecking) return
+        val seq = generation
+        mutable.update { it.copy(usageChecking = true, usageDiagnosis = null) }
+        scope.launch {
+            val result = try { gateway.diagnoseQuota() }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { "Falló la consulta a Muse Code: " + e.message }
+            if (seq == generation && mutable.value.sessionId == sid)
+                mutable.update { it.copy(usageChecking = false, usageDiagnosis = result) }
         }
     }
 
