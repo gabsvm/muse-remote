@@ -39,3 +39,12 @@ Más detalles: [compatibilidad](COMPATIBILITY.md), [seguridad](../SECURITY.md), 
 - El icono de ajustes de la lista abre el estado **Contributor** guardado en Muse Code de esa PC. **No es un ajuste por chat ni por modelo.** Activarlo requiere consentimiento explícito porque Meta podrá utilizar contenido de conversaciones, código y archivos para entrenamiento. Ver [documentación oficial](https://dev.meta.ai/docs/muse-code/subscriptions).
 - Para cambiar Contributor desde la APK, el servidor Windows debe tener la versión 0.2.0-beta.3 o superior. Se guarda en el archivo de preferencias real del CLI y se muestra la necesidad de **reiniciar Muse Remote en la PC**; el proceso existente puede mantener el estado previo. La configuración con overrides de entorno o cuentas gestionadas puede bloquear el cambio.
 - Si solo actualizás Android, los proyectos y pines funcionan, pero el panel Contributor indicará que el servidor de tu PC necesita actualización.
+
+## Diagnóstico Contributor y cuota (beta.5)
+
+- **Contributor:** aparece en **Tus sesiones → engranaje** y dentro de cada conversación en **Modelo / Razonamiento → Contributor · configuración de la PC**. No es un selector por modelo; controla una preferencia global del CLI.
+- Para poder leer o cambiar Contributor desde el teléfono, el puente Windows activo debe ser beta.3 o posterior. Verifica su versión abriendo `http://127.0.0.1:8787/api/health` **en la PC**; no publiques ese endpoint en internet.
+- Si la APK es más nueva que el puente, el control mostrará una instrucción explícita para actualizar el puente. La reinstalación del APK **no** actualiza automáticamente el backend de Windows.
+- **Cuota:** `Releer datos observados` consulta el último `usage/read` cacheado; **Consultar cuota desde Muse Code** invoca explícitamente `muse usage --json` en la PC (comando oficial **sin turno de modelo**), con máximo una consulta por minuto y sin devolver datos personales de la cuenta al cliente.
+- Si devuelve `server_sent_no_usage`, el servicio de Muse no envió porcentajes para la ventana. No significa cuota agotada ni error de autenticación: la app lo mostrará como ausencia de datos en lugar de inventar cifras. Puede ocurrir antes de algún uso en una ventana nueva. **No ejecutes una inferencia artificial para forzar la medición.**
+- Si tu puente Windows aún es 0.1.0, actualízalo conservando `.token`, `.lan.*`, `.vapid.json` y el mismo puerto; reinícialo de forma controlada. Mantener la firma APK y los ficheros de credenciales permite conservar el emparejamiento.

@@ -15,6 +15,7 @@ import io.muse.remote.core.reasoningEffortLevels
 /** Per-session model and effort choices sent over MSP to the already-running PC bridge. */
 @Composable
 internal fun ModelSettingsBar(state: MuseState, controller: MuseController) {
+    var contributorOpen by remember { mutableStateOf(false) }
     val canEdit = state.sessionReady && !state.working && !state.sending &&
         !state.modelSettingsSaving && !state.modelSettingsLoading
     val currentModel = state.models.firstOrNull { it.id == state.activeModelId }
@@ -63,6 +64,12 @@ internal fun ModelSettingsBar(state: MuseState, controller: MuseController) {
             TextButton(onClick = controller::refreshModelSettings,
                 modifier = Modifier.align(Alignment.End)) { Text("Reintentar catálogo") }
         }
+        TextButton(onClick = {
+            controller.refreshContributor()
+            contributorOpen = true
+        }) {
+            Text("Contributor · configuración de la PC")
+        }
         if (state.working) {
             Text("Los ajustes se pueden cambiar al terminar el turno.",
                 style = MaterialTheme.typography.labelSmall,
@@ -75,6 +82,8 @@ internal fun ModelSettingsBar(state: MuseState, controller: MuseController) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+    if (contributorOpen) ContributorSettingsDialog(state, controller,
+        onDismiss = { contributorOpen = false })
 }
 
 private fun effortLabel(value: String): String = when (value) {
