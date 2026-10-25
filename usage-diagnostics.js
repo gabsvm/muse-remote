@@ -22,12 +22,37 @@ function normalizeUsageReport(raw, now = Date.now()) {
   // Never propagate provider error hints verbatim (may contain local details).
   const reason = !available && data.reason === 'server_sent_no_usage'
     ? 'server_sent_no_usage' : (!available ? 'not_reported' : 'available');
+  const percent = v => typeof v === 'number' && Number.isFinite(v) &&
+    v >= 0 && v <= 100 ? Math.round(v) : null;
+  const windowUsedPercent = available ? percent(data.allowance.window?.usedPercent) : null;
+  const weeklyUsedPercent = available ? percent(data.allowance.weekly?.usedPercent) : null;
+  const tier = available && typeof data.allowance.tier === 'string'
+    ? data.allowance.tier.slice(0, 60) : null;
   const message = available
-    ? 'Muse devolvió una medición de cuota. Podés consultar los porcentajes observados.'
+    ? [tier, windowUsedPercent == null ? 'Ventana: sin datos' : `Ventana: ${windowUsedPercent}% usado`,
+      weeklyUsedPercent == null ? 'Semana: sin datos' : `Semana: ${weeklyUsedPercent}% usado`]
+        .filter(Boolean).join(' · ')
     : reason === 'server_sent_no_usage'
       ? 'Muse respondió, pero su servidor no devolvió porcentajes de uso para esta ventana.'
       : 'Muse Code no devolvió una medición de cuota. Revisá la suscripción desde la PC.';
-  return { available, reason, message, checkedAtMs: now };
+  return { available, reason, message, checkedAtMs: now,
+    windowUsedPercent, weeklyUsedPercent };
+}
+
+/**
+ * On Windows Muse installs a .cmd launcher. execFile() with shell:false
+ * cannot execute a .cmd file. Resolve the signed local native .exe through
+ * the install's version marker without invoking cmd.exe or interpolating shell.
+ */
+function museExecutable(env = process.env) {
+  if (process.platform !== 'win32') return 'muse';
+  const base = env.LOCALAPPDATA && path.join(env.LOCALAPPDATA, 'Programs', 'muse');
+  if (!base) throw Error('Muse installation not found');
+  const version = fs.readFileSync(path.join(base, '.muse-version'), 'utf8').trim();
+  if (!/^\d+\.\d+\.\d+-R\d+\.\d+$/.test(version)) throw Error('Invalid Muse version marker');
+  const binary = path.join(base, `muse-bin-${version}.exe`);
+  if (!fs.statSync(binary).isFile()) throw Error('Invalid Muse binary');
+  return binary;
 }
 
 function execUsage() {
@@ -35,7 +60,10 @@ function execUsage() {
     const env = { ...process.env };
     delete env.META_API_KEY;
     // Do not allow caller-supplied commands or flags.
-    execFile('muse', ['usage', '--json'], {
+    let executable;
+    try { executable = museExecutable(env); }
+    catch { reject(Error('Muse CLI not available on host')); return; }
+    execFile(executable, ['usage', '--json'], {
       timeout: 15_000, maxBuffer: 32 * 1024, windowsHide: true, shell: false, env
     }, (err, stdout) => {
       if (err) { reject(Error('No se pudo consultar la cuota de Muse Code en la PC.')); return; }
@@ -63,4 +91,4 @@ function usageDiagnostics() {
   return inflight;
 }
 
-module.exports = { normalizeUsageReport, usageDiagnostics };
+module.exports = { normalizeUsageReport, usageDiagnostics, museExecutable };

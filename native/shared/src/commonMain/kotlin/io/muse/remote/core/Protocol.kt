@@ -55,6 +55,9 @@ interface CredentialsStore {
     fun saveProjects(value: List<RemoteProject>) {}
     fun projectAssignments(): Map<String, String> = emptyMap()
     fun saveProjectAssignments(value: Map<String, String>) {}
+    /** Android-local session aliases until session/rename is supported by Muse on Windows. */
+    fun sessionAliases(): Map<String, String> = emptyMap()
+    fun saveSessionAliases(value: Map<String, String>) {}
     fun pinnedSessionIds(): Set<String> = emptySet()
     fun savePinnedSessionIds(value: Set<String>) {}
     fun hiddenSessionIds(): Set<String> = emptySet()
@@ -67,6 +70,7 @@ class MemoryCredentialsStore : CredentialsStore {
     private var session: String? = null
     private val projectList = mutableListOf<RemoteProject>()
     private val assignments = mutableMapOf<String, String>()
+    private val aliases = mutableMapOf<String, String>()
     private val pinned = mutableSetOf<String>()
     private val hidden = mutableSetOf<String>()
     override fun read() = credentials
@@ -78,6 +82,8 @@ class MemoryCredentialsStore : CredentialsStore {
     override fun saveProjects(value: List<RemoteProject>) { projectList.clear(); projectList.addAll(value) }
     override fun projectAssignments(): Map<String, String> = assignments.toMap()
     override fun saveProjectAssignments(value: Map<String, String>) { assignments.clear(); assignments.putAll(value) }
+    override fun sessionAliases(): Map<String, String> = aliases.toMap()
+    override fun saveSessionAliases(value: Map<String, String>) { aliases.clear(); aliases.putAll(value) }
     override fun pinnedSessionIds(): Set<String> = pinned.toSet()
     override fun savePinnedSessionIds(value: Set<String>) { pinned.clear(); pinned.addAll(value) }
     override fun hiddenSessionIds(): Set<String> = hidden.toSet()
@@ -290,6 +296,7 @@ data class MuseState(
     val projects: List<RemoteProject> = emptyList(),
     val projectAssignments: Map<String, String> = emptyMap(),
     val pinnedSessionIds: Set<String> = emptySet(),
+    val sessionAliases: Map<String, String> = emptyMap(),
     val contributor: ContributorStatus = ContributorStatus(),
     val contributorLoading: Boolean = false,
     val contributorSaving: Boolean = false,

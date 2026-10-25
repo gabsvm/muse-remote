@@ -112,6 +112,24 @@ class AndroidCredentialsStore(context: Context) : CredentialsStore {
         }
     }
 
+    override fun sessionAliases(): Map<String, String> = runCatching {
+        val raw = JSONObject(organizer.getString("session_aliases", "{}") ?: "{}")
+        raw.keys().asSequence().take(10000).mapNotNull { id ->
+            val label = raw.optString(id).trim()
+            if (id.isBlank() || label.isBlank() || label.length > 80) null else id to label
+        }.toMap()
+    }.getOrDefault(emptyMap())
+
+    override fun saveSessionAliases(value: Map<String, String>) {
+        val obj = JSONObject()
+        value.entries.take(10000).forEach { (id, label) ->
+            if (id.isNotBlank() && label.isNotBlank() && label.length <= 80) obj.put(id, label)
+        }
+        check(organizer.edit().putString("session_aliases", obj.toString()).commit()) {
+            "No se pudieron guardar los nombres de los chats."
+        }
+    }
+
     override fun pinnedSessionIds(): Set<String> =
         organizer.getStringSet("pinned", emptySet())?.toSet() ?: emptySet()
 

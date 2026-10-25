@@ -43,3 +43,9 @@ Comparación de experiencia con Codex Remote (control de sesiones, side chats, p
 - El APK QA debug firmado es para pruebas; no una versión Play Store ni una garantía de paridad completa.
 
 Fuentes de comparación: [Codex Remote](https://developers.openai.com/blog/mastering-codex-remote-for-engineering), [Codex mobile](https://learn.chatgpt.com/docs/mobile), [Claude Code Remote Control](https://support.claude.com/en/articles/14554000-claude-code-power-user-tips).
+
+## Beta 0.2.0-beta.6: nombres locales + cuota real en Windows
+
+- **Renombrar chats**: desde `⋮ → Renombrar chat` o el lápiz junto al título del chat. Guarda un alias privado del dispositivo Android, con restauración del nombre original, persistencia tras reiniciar, y búsquedas por alias o nombre original. **El historial MSP no cambia**. Muse Code en Windows 1.4.13 no admite `session/rename` remoto; la UI no debe afirmar sincronización con la PC.
+- **Cuota**: en Windows el instalador Muse deja un `muse.cmd` que no es ejecutable por `execFile` con `shell:false`. El puente beta.6 usa el `.muse-version` local para localizar el binario nativo `muse-bin-<versión>.exe`, sin ejecutar comandos shell ni turnos de modelo. Muestra el porcentaje real de ventana y semana solo cuando el CLI los proporciona. Conserva autenticación del endpoint y limitación de frecuencia a una consulta por minuto.
+- **Próximas prioridades**: cola visible y `turn/unqueue`, diffs estructurados desde `patchRef`, búsqueda en el contenido del historial, sincronización cifrada de proyectos/aliases/pines, skills ejecutables, estado/subagentes, borradores persistentes y notificaciones Android en segundo plano.
