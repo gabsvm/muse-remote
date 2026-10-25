@@ -25,6 +25,7 @@ class MuseController(
             hiddenSessionIds = credentials.hiddenSessionIds(),
             projects = credentials.projects(), projectAssignments = credentials.projectAssignments(),
             pinnedSessionIds = credentials.pinnedSessionIds(),
+            sessionAliases = credentials.sessionAliases(),
             savedConnectionAvailable = savedLoginAtStart != null,
             restoringConnection = savedLoginAtStart != null,
             loading = savedLoginAtStart != null,
@@ -139,7 +140,8 @@ class MuseController(
         credentials.clear()
         mutable.value = MuseState(hiddenSessionIds = credentials.hiddenSessionIds(),
             projects = credentials.projects(), projectAssignments = credentials.projectAssignments(),
-            pinnedSessionIds = credentials.pinnedSessionIds())
+            pinnedSessionIds = credentials.pinnedSessionIds(),
+            sessionAliases = credentials.sessionAliases())
     }
 
     fun hideSession(id: String) {
@@ -235,6 +237,31 @@ class MuseController(
         else updated[sessionId] = projectId
         credentials.saveProjectAssignments(updated)
         mutable.update { it.copy(projectAssignments = updated) }
+    }
+
+    /** Rename is local on Windows: MSP session/rename is not supported on this host. */
+    fun renameSessionLocally(id: String, label: String) {
+        val name = label.trim()
+        if (id.isBlank() || name.isBlank() || name.length > 80 ||
+            name.any { it.code < 32 || it.code == 127 }) {
+            reportError("Elegí un nombre entre 1 y 80 caracteres sin controles.")
+            return
+        }
+        try {
+            val updated = mutable.value.sessionAliases.toMutableMap()
+            updated[id] = name
+            credentials.saveSessionAliases(updated)
+            mutable.update { it.copy(sessionAliases = updated) }
+        } catch (_: Exception) { reportError("No se pudo guardar el nombre del chat.") }
+    }
+
+    fun restoreSessionName(id: String) {
+        if (id.isBlank() || id !in mutable.value.sessionAliases) return
+        try {
+            val updated = mutable.value.sessionAliases - id
+            credentials.saveSessionAliases(updated)
+            mutable.update { it.copy(sessionAliases = updated) }
+        } catch (_: Exception) { reportError("No se pudo restaurar el nombre original.") }
     }
 
     fun togglePinned(sessionId: String) {

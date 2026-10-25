@@ -23,7 +23,9 @@ test('CLI diagnostic only indicates availability and drops private provider payl
   }), 2000);
   assert.equal(r.available,true);
   assert.equal(r.reason,'available');
-  assert.doesNotMatch(JSON.stringify(r),/@|42/);
+  assert.equal(r.windowUsedPercent,42);
+  assert.equal(r.weeklyUsedPercent,null);
+  assert.doesNotMatch(JSON.stringify(r),/private@example.com/);
   assert.throws(()=>normalizeUsageReport('not json'),SyntaxError);
 });
 

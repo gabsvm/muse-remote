@@ -332,7 +332,7 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
             }
             Spacer(Modifier.height(10.dp))
             val shown = remember(state.sessions, search, state.hiddenSessionIds,
-                showHidden, state.pinnedSessionIds, state.projectAssignments, projectFilter) {
+                showHidden, state.pinnedSessionIds, state.projectAssignments, state.sessionAliases, projectFilter) {
                 state.sessions.filter {
                     val inScope = when (projectFilter) {
                         "all" -> true
@@ -341,10 +341,12 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                         else -> state.projectAssignments[it.id] == projectFilter
                     }
                     (it.id in state.hiddenSessionIds) == showHidden && inScope &&
-                        (it.title.contains(search, true) || it.workspace.contains(search, true))
+                        ((state.sessionAliases[it.id] ?: it.title).contains(search, true) ||
+                            it.title.contains(search, true) || it.workspace.contains(search, true))
                 }.sortedWith(compareByDescending<SessionSummary> {
                     it.id in state.pinnedSessionIds
                 }.thenByDescending { it.updatedAt })
+                    .map { it.copy(title = state.sessionAliases[it.id] ?: it.title) }
             }
             if (state.sessionsLoading) {
                 LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -394,6 +396,13 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                     items(shown, key = { it.id }) { session ->
                         SessionRow(
                             session = session,
+                            originalTitle = state.sessions.firstOrNull { it.id == session.id }?.title
+                                ?: session.title,
+                            alias = state.sessionAliases[session.id],
+                            onRename = { value ->
+                                if (value == null) controller.restoreSessionName(session.id)
+                                else controller.renameSessionLocally(session.id, value)
+                            },
                             hidden = showHidden,
                             pinned = session.id in state.pinnedSessionIds,
                             project = state.projects.firstOrNull {
@@ -465,6 +474,9 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
 @Composable
 private fun SessionRow(
     session: SessionSummary,
+    originalTitle: String,
+    alias: String?,
+    onRename: (String?) -> Unit,
     hidden: Boolean,
     pinned: Boolean,
     project: RemoteProject?,
@@ -477,6 +489,12 @@ private fun SessionRow(
     val isRunning = session.status == "running"
     var menuExpanded by remember(session.id) { mutableStateOf(false) }
     var moveDialog by remember(session.id) { mutableStateOf(false) }
+    var renameDialog by remember(session.id) { mutableStateOf(false) }
+    if (renameDialog) RenameSessionDialog(
+        originalTitle = originalTitle, alias = alias,
+        onSave = { onRename(it) }, onReset = { onRename(null) },
+        onDismiss = { renameDialog = false },
+    )
     if (moveDialog) {
         var assignment by remember(session.id) { mutableStateOf(project?.id) }
         AlertDialog(onDismissRequest = { moveDialog = false },
@@ -537,6 +555,11 @@ private fun SessionRow(
                 DropdownMenu(expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false }) {
                     DropdownMenuItem(
+                        text = { Text("Renombrar chat") },
+                        leadingIcon = { Icon(Icons.Default.Edit, null) },
+                        onClick = { menuExpanded = false; renameDialog = true },
+                    )
+                    DropdownMenuItem(
                         text = { Text(if (pinned) "Desfijar chat" else "Fijar arriba") },
                         leadingIcon = { Icon(Icons.Default.PushPin, null) },
                         onClick = { menuExpanded = false; onPin() },
@@ -577,6 +600,7 @@ private fun ConversationScene(
     var attachment by remember(state.sessionId) { mutableStateOf<PickedAttachment?>(null) }
     var attachmentMenu by remember { mutableStateOf(false) }
     var showTools by remember(state.sessionId) { mutableStateOf(false) }
+    var showRename by remember(state.sessionId) { mutableStateOf(false) }
     var sendAsSteer by remember(state.sessionId) { mutableStateOf(false) }
     LaunchedEffect(state.turnId, state.working, attachment) {
         if (state.turnId == null || !state.working || attachment != null) sendAsSteer = false
@@ -614,6 +638,13 @@ private fun ConversationScene(
         else if (nearTail) followTail = true
     }
 
+    if (showRename) RenameSessionDialog(
+        originalTitle = state.sessionTitle,
+        alias = state.sessionId?.let { state.sessionAliases[it] },
+        onSave = { name -> state.sessionId?.let { controller.renameSessionLocally(it, name) } },
+        onReset = { state.sessionId?.let(controller::restoreSessionName) },
+        onDismiss = { showRename = false },
+    )
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
@@ -623,8 +654,17 @@ private fun ConversationScene(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Volver a sesiones")
             }
             Column(Modifier.weight(1f)) {
-                Text(state.sessionTitle, style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(state.sessionId?.let { state.sessionAliases[it] } ?: state.sessionTitle,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis)
+                    IconButton(onClick = { showRename = true }, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Renombrar chat",
+                            modifier = Modifier.size(17.dp))
+                    }
+                }
                 Text(state.workspace.substringAfterLast('\\').substringAfterLast('/').ifBlank { "Sin carpeta" },
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1)
