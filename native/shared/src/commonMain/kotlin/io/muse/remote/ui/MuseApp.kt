@@ -49,6 +49,9 @@ fun MuseApp(
     scanPair: (() -> Unit)? = null,
     pickImage: (((PickedAttachment) -> Unit) -> Unit)? = null,
     pickDocument: (((PickedAttachment) -> Unit) -> Unit)? = null,
+    brandArtwork: (@Composable () -> Unit)? = null,
+    notificationsEnabled: Boolean = false,
+    onNotificationsChange: ((Boolean) -> Unit)? = null,
 ) {
     val state by controller.state.collectAsState()
     val dark = isSystemInDarkTheme()
@@ -66,8 +69,8 @@ fun MuseApp(
         Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().safeDrawingPadding().imePadding()) {
                 when (state.screen) {
-                    Screen.Login -> LoginScene(state, controller, discovery, scanPair)
-                    Screen.Sessions -> SessionScene(state, controller)
+                    Screen.Login -> LoginScene(state, controller, discovery, scanPair, brandArtwork)
+                    Screen.Sessions -> SessionScene(state, controller, brandArtwork, notificationsEnabled, onNotificationsChange)
                     Screen.Conversation -> ConversationScene(
                         state, controller, pickImage, pickDocument,
                     )
@@ -83,6 +86,7 @@ private fun LoginScene(
     controller: MuseController,
     discovery: LanDiscovery,
     scanPair: (() -> Unit)?,
+    brandArtwork: (@Composable () -> Unit)?,
 ) {
     var endpoint by remember(state.endpoint) { mutableStateOf(state.endpoint) }
     var token by remember { mutableStateOf("") }
@@ -112,7 +116,11 @@ private fun LoginScene(
         Box(
             Modifier.size(68.dp).background(MaterialTheme.colorScheme.primary, RoundedCornerShape(22.dp)),
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Default.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(34.dp)) }
+        ) {
+            if (brandArtwork != null) brandArtwork()
+            else Icon(Icons.Default.Terminal, contentDescription = null,
+                tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(34.dp))
+        }
         Spacer(Modifier.height(24.dp))
         Text("Muse Remote", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
@@ -243,7 +251,13 @@ private fun LoginScene(
 }
 
 @Composable
-private fun SessionScene(state: MuseState, controller: MuseController) {
+private fun SessionScene(
+    state: MuseState,
+    controller: MuseController,
+    brandArtwork: (@Composable () -> Unit)? = null,
+    notificationsEnabled: Boolean = false,
+    onNotificationsChange: ((Boolean) -> Unit)? = null,
+) {
     var search by remember { mutableStateOf("") }
     var createDialog by remember { mutableStateOf(false) }
     var showHidden by remember { mutableStateOf(false) }
@@ -259,6 +273,10 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 10.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically) {
+            if (brandArtwork != null) {
+                Box(Modifier.size(34.dp), contentAlignment = Alignment.Center) { brandArtwork() }
+                Spacer(Modifier.width(9.dp))
+            }
             Column(Modifier.weight(1f)) {
                 Text("Muse Remote", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                 Text("Estación conectada", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
@@ -304,6 +322,23 @@ private fun SessionScene(state: MuseState, controller: MuseController) {
                 Icon(Icons.Default.Settings, null, Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Modo Contributor · ajustes de la PC")
+            }
+            if (onNotificationsChange != null) {
+                Row(Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Avisos de aprobación y finalización",
+                            style = MaterialTheme.typography.bodyMedium)
+                        Text("Solo mientras la app siga activa en memoria",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(
+                        checked = notificationsEnabled,
+                        onCheckedChange = onNotificationsChange,
+                    )
+                }
             }
             Spacer(Modifier.height(4.dp))
             OutlinedTextField(

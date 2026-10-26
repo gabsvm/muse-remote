@@ -2,8 +2,8 @@
 // Red primero (con revalidacion no-cache del servidor) y cache como respaldo
 // offline: antes era cache-first y la PWA podia quedarse con un app.js viejo
 // hasta que se cambiaba la version del SW.
-const CACHE = 'muse-remote-v22';
-const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/theme.js', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'muse-remote-v24';
+const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/theme.js', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/muse-remote-wordmark.png', '/apple-touch-icon.png'];
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
 });
@@ -45,7 +45,7 @@ self.addEventListener('push', (e) => {
       if (d.tag !== 'test' && cs.some((c) => c.visibilityState === 'visible' && c.focused)) return undefined;
       return self.registration.showNotification(d.title || 'Muse Remote', {
         body: d.body || '', tag: d.tag || 'muse', renotify: true,
-        icon: '/icon.svg', badge: '/icon.svg', data: { sessionId: d.sessionId || null },
+        icon: '/icon-192.png', badge: '/icon-192.png', data: { sessionId: d.sessionId || null },
       });
     })
   );

@@ -175,3 +175,19 @@ pulsar **Reintentar conexión** en Android. No se fuerza un takeover.
 - El icono de ajustes de la lista abre el estado **Contributor** guardado en Muse Code de esa PC. **No es un ajuste por chat ni por modelo.** Activarlo requiere consentimiento explícito porque Meta podrá utilizar contenido de conversaciones, código y archivos para entrenamiento. Ver [documentación oficial](https://dev.meta.ai/docs/muse-code/subscriptions).
 - Para cambiar Contributor desde la APK, el servidor Windows debe tener la versión 0.2.0-beta.3 o superior. Se guarda en el archivo de preferencias real del CLI y se muestra la necesidad de **reiniciar Muse Remote en la PC**; el proceso existente puede mantener el estado previo. La configuración con overrides de entorno o cuentas gestionadas puede bloquear el cambio.
 - Si solo actualizás Android, los proyectos y pines funcionan, pero el panel Contributor indicará que el servidor de tu PC necesita actualización.
+
+## Beta 0.2.0-beta.9 — Branding y avisos nativos
+
+- Se reemplazó el launcher genérico por el icono aprobado Muse Remote: símbolo M verde/cian con señal, formato normal y `adaptive-icon` (incluye monocromo para launchers con iconos temáticos).
+- Se añadió marca coherente a la pantalla de conexión y encabezado Android, así como PWA: favicon, manifest instalable, iconos maskable/apple-touch y caché `muse-remote-v24`. Las imágenes no contienen archivos de fuentes.
+- **Avisos Android de actividad (primera fase)**: opción desactivada por defecto en **Tus sesiones**, activación expresa y permiso `POST_NOTIFICATIONS` en Android 13+. Canales para solicitudes de aprobación nuevas y turnos completados, sin mostrar contenido privado del prompt.
+- Los avisos se entregan **solo cuando la aplicación queda en segundo plano pero su proceso sigue activo y conectado**. No hay servicio persistente, WebSocket adicional, FCM, arranque al encender ni notificaciones garantizadas después de que Android cierre el proceso.
+- Un tracker independiente evita alertas duplicadas de snapshots antiguos, evita avisar por cambiar de sesión y no confunde un turno en pausa por aprobación con uno finalizado. Cuatro pruebas unitarias.
+- El puente beta.7 no necesita una migración de autenticación para usar la APK; para actualizar el branding de la PWA se debe actualizar el paquete web y su service worker. No cambian `.token`, certificados TLS ni los nombres/proyectos/pines locales de Android.
+
+### Pendientes, sin afirmar paridad completa
+
+- Notificaciones en segundo plano tras finalizar el proceso Android: requiere elección explícita de arquitectura de entrega (por ejemplo, infraestructura push, credenciales/revocación por dispositivo y límites de privacidad/Doze).
+- Sincronización cifrada entre dispositivos: esquema de metadatos y política de conflictos E2EE.
+- Búsqueda global por contenido: índice seguro opt-in, procesamiento incremental y cuota de almacenamiento.
+- Worktrees Git con operaciones controladas, accesibilidad TalkBack y rendimiento Android instrumentado.

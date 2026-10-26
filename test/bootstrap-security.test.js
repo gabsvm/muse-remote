@@ -41,7 +41,7 @@ test('unauthenticated health provides readiness but not internal MSP metadata',a
     assert.equal(res.status,200);
     const data=await res.json();
     assert.equal(data.ok,true);
-    assert.equal(data.version,'0.2.0-beta.7');
+    assert.equal(data.version,'0.2.0-beta.9');
     assert.ok(!Object.prototype.hasOwnProperty.call(data,'serverInfo'));
   }finally{await new Promise(resolve=>server.close(resolve));}
 });

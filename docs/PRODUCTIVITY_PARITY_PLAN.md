@@ -43,3 +43,19 @@ Seguridad: el gateway solo usa endpoints MSP permitidos explícitamente en el pu
 - No requiere actualizar el backend beta.7: ya estaban autorizados los RPC de subagentes y \`item/readOutput\`.
 - La búsqueda global indexada, sincronización, notificaciones Android/Doze, worktrees editables y pruebas en dispositivo físico siguen pendientes.
 - Toda ejecución potencial de un modelo requiere interacción explícita en la app. Los tests son MockEngine y parser puro; no llaman a suscripciones.
+
+## Beta 0.2.0-beta.9 — Branding y avisos nativos
+
+- Se reemplazó el launcher genérico por el icono aprobado Muse Remote: símbolo M verde/cian con señal, formato normal y `adaptive-icon` (incluye monocromo para launchers con iconos temáticos).
+- Se añadió marca coherente a la pantalla de conexión y encabezado Android, así como PWA: favicon, manifest instalable, iconos maskable/apple-touch y caché `muse-remote-v24`. Las imágenes no contienen archivos de fuentes.
+- **Avisos Android de actividad (primera fase)**: opción desactivada por defecto en **Tus sesiones**, activación expresa y permiso `POST_NOTIFICATIONS` en Android 13+. Canales para solicitudes de aprobación nuevas y turnos completados, sin mostrar contenido privado del prompt.
+- Los avisos se entregan **solo cuando la aplicación queda en segundo plano pero su proceso sigue activo y conectado**. No hay servicio persistente, WebSocket adicional, FCM, arranque al encender ni notificaciones garantizadas después de que Android cierre el proceso.
+- Un tracker independiente evita alertas duplicadas de snapshots antiguos, evita avisar por cambiar de sesión y no confunde un turno en pausa por aprobación con uno finalizado. Cuatro pruebas unitarias.
+- El puente beta.7 no necesita una migración de autenticación para usar la APK; para actualizar el branding de la PWA se debe actualizar el paquete web y su service worker. No cambian `.token`, certificados TLS ni los nombres/proyectos/pines locales de Android.
+
+### Pendientes, sin afirmar paridad completa
+
+- Notificaciones en segundo plano tras finalizar el proceso Android: requiere elección explícita de arquitectura de entrega (por ejemplo, infraestructura push, credenciales/revocación por dispositivo y límites de privacidad/Doze).
+- Sincronización cifrada entre dispositivos: esquema de metadatos y política de conflictos E2EE.
+- Búsqueda global por contenido: índice seguro opt-in, procesamiento incremental y cuota de almacenamiento.
+- Worktrees Git con operaciones controladas, accesibilidad TalkBack y rendimiento Android instrumentado.

@@ -13,8 +13,8 @@
 <meta name="description" content="Control remoto local para Muse Code">
 <title>Muse Remote</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="icon" href="/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/styles.css">
 <!-- Aplica el tema guardado antes de pintar (sin parpadeo). -->
 <script src="/theme.js"></script>
@@ -51,7 +51,7 @@
     <svg class="ic" aria-hidden="true"><use href="#i-back"/></svg>
   </button>
   <div class="top-title">
-    <span id="topTitle" class="brand">Muse Remote</span>
+    <span class="brand-lockup"><img src="/icon-192.png" width="28" height="28" alt="" aria-hidden="true"><span id="topTitle" class="brand">Muse Remote</span></span>
     <span id="topSub" class="top-sub hidden"></span>
   </div>
   <span id="statusBadge" class="pill hidden" data-state="idle" role="status" aria-label="Estado de la sesión: listo">listo</span>
@@ -75,7 +75,8 @@
   <!-- ===== Login ===== -->
   <section id="loginView" class="view" aria-labelledby="loginTitle">
     <form id="loginForm" class="card login-card" novalidate>
-      <div class="login-logo" aria-hidden="true"><img src="/icon.svg" alt="" width="56" height="56"></div>
+      <div class="login-logo" aria-hidden="true"><img src="/icon-192.png" alt="" width="56" height="56"></div>
+      <div class="login-brand" aria-label="Muse Remote"><img src="/muse-remote-wordmark.png" alt="Muse Remote" width="280" height="69"></div>
       <h1 id="loginTitle" tabindex="-1" data-view-focus>Acceso local</h1>
       <p class="muted">Introduce el token que muestra el backend al arrancar. Se guarda solo en este dispositivo.</p>
       <label for="tokenInput">Token</label>
@@ -134,7 +135,7 @@
     <h1 id="chatTitle" class="sr-only" tabindex="-1" data-view-focus>Chat</h1>
     <div id="wsLine" class="ws-line muted"></div>
     <div id="chatEmpty" class="chat-empty hidden">
-      <img src="/icon.svg" alt="" width="48" height="48">
+      <img src="/icon-192.png" alt="" width="48" height="48">
       <h2>¿En qué trabajamos?</h2>
       <p class="muted">Escribe un mensaje o elige una idea. Usa <kbd>/</kbd> para skills y comandos.</p>
       <div class="suggests">
