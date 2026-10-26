@@ -24,8 +24,8 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = providers.environmentVariable("GITHUB_RUN_NUMBER").orNull
-            ?.toIntOrNull()?.let { maxOf(it + 1, 78) } ?: 78
-        versionName = "0.2.0-beta.6"
+            ?.toIntOrNull()?.let { maxOf(it + 1, 81) } ?: 81
+        versionName = "0.2.0-beta.7"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
