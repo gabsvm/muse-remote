@@ -154,6 +154,71 @@ class MuseGateway(
     suspend fun usageSnapshot(): SubscriptionSnapshot? =
         SubscriptionSnapshot.from(rpc("usage/read"))
 
+    /** Experimental MSP read-only feature. No shell or git process. */
+    suspend fun listWorktrees(workspaceRoot: String): List<WorktreeRow> {
+        require(workspaceRoot.isNotBlank()) { "La sesión no tiene carpeta de trabajo." }
+        return rpc("worktree/list", buildJsonObject { put("workspaceRoot", workspaceRoot) })
+            .array("worktrees").orEmpty().mapNotNull {
+                (it as? JsonObject)?.let(WorktreeRow::from)
+            }
+    }
+
+    suspend fun listTasks(sessionId: String): List<RemoteTask> =
+        rpc("task/list", buildJsonObject { put("sessionId", sessionId) })
+            .array("tasks").orEmpty().mapNotNull { (it as? JsonObject)?.let(RemoteTask::from) }
+
+    suspend fun stopTask(sessionId: String, taskId: String) {
+        require(taskId.isNotBlank())
+        rpc("task/stop", buildJsonObject {
+            put("commandId", commandId())
+            put("sessionId", sessionId)
+            put("taskId", taskId)
+        })
+    }
+
+    suspend fun unqueue(sessionId: String, turnId: String) {
+        require(turnId.isNotBlank())
+        val response = rpc("turn/unqueue", buildJsonObject {
+            put("commandId", commandId())
+            put("sessionId", sessionId)
+            put("turnId", turnId)
+        })
+        require(response.string("turnId") == turnId && response.string("status") == "accepted") { "Muse no confirmó la retirada del turno." }
+    }
+
+    suspend fun patchText(sessionId: String, itemId: String, refId: String): String {
+        val result = rpc("item/readOutput", buildJsonObject {
+            put("sessionId", sessionId)
+            put("itemId", itemId)
+            put("outputRef", refId)
+            put("offsetBytes", 0)
+            put("lengthBytes", 196608)
+        })
+        if (result.string("encoding") != "utf8" && result.string("encoding") != "utf-8")
+            return "El diff no está disponible como texto UTF-8."
+        val raw = result.string("content").orEmpty()
+        return raw.take(50000) + if (result["eof"] != JsonPrimitive(true))
+            "\n\n[Vista parcial; diff almacenado más largo]" else ""
+    }
+
+    /** Skill input requires an explicit user tap; never invoke from loading an inventory. */
+    suspend fun invokeSkill(sessionId: String, selector: String, arguments: String): JsonObject {
+        val valid = listSkills(sessionId).any { it.selector == selector }
+        require(valid) { "Skill fuera del catálogo de esta sesión." }
+        return rpc("turn/start", buildJsonObject {
+            put("commandId", commandId())
+            put("sessionId", sessionId)
+            put("ifBusy", "queue")
+            putJsonArray("input") {
+                add(buildJsonObject {
+                    put("type", "skill")
+                    put("selector", selector)
+                    if (arguments.isNotBlank()) put("arguments", arguments.trim().take(8000))
+                })
+            }
+        })
+    }
+
     suspend fun listSkills(sessionId: String): List<MuseSkill> =
         rpc("skill/list", buildJsonObject { put("sessionId", sessionId) })
             .array("skills").orEmpty().mapNotNull { (it as? JsonObject)?.let(MuseSkill::from) }
@@ -277,7 +342,7 @@ class MuseGateway(
         commandId: String,
         photo: ComposerAttachment.Photo? = null,
         document: UploadedDocument? = null,
-    ) {
+    ): JsonObject {
         require(photo == null || (photo.base64Data.length <= 4 * 1024 * 1024 &&
             photo.width in 1..1568 && photo.height in 1..1568)) {
             "Imagen demasiado grande."
@@ -291,7 +356,7 @@ class MuseGateway(
             append(document.path)
             append("\nUsa esta ruta si necesitas leer el archivo.")
         }
-        rpc("turn/start", buildJsonObject {
+        return rpc("turn/start", buildJsonObject {
             put("commandId", commandId)
             put("sessionId", sessionId)
             put("ifBusy", "queue")

@@ -1,6 +1,6 @@
 {
   "name": "muse-remote",
-  "version": "0.2.0-beta.6",
+  "version": "0.2.0-beta.7",
   "description": "Control remoto local (PWA mobile-first) para Muse Code CLI via protocolo MSP oficial (muse serve stdio). Sin API keys PAYG.",
   "type": "commonjs",
   "engines": {

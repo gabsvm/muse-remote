@@ -1,0 +1,36 @@
+# Muse Remote — paridad operacional y entregas progresivas
+
+Corte de trabajo: 2026-10-25. Objetivo: acercar la experiencia remota Android/PWA a las funciones expuestas por Muse Code 1.4.13; no emular ni ejecutar herramientas de Codex/Claude.
+
+## Primer bloque implementado en la rama feat/native-productivity-parity
+
+| Función | Implementación | Límite honesto |
+|---|---|---|
+| Borradores por conversación | Android Keystore AES-GCM; guardado con debounce y al salir | Solo texto del composer, local a esta instalación; adjuntos binarios no persistidos |
+| Cola de envíos | Visualización de `session/read.queuedInputs`, IDs propios extraídos de `turn/start`, cancelación selectiva `turn/unqueue` | **No cancelar** filas remotas que no traen ID. Rechazos al competir con lanzamiento no se presentan como éxito |
+| Tareas activas | `task/list`, `task/stop` confirmado sobre tarea background individual | Lista puntual; no daemon de seguimiento ni botón para detener todas |
+| Visor de parches | `patchRef` y `patchSummary` desde transcript/eventos, `item/readOutput` con límite de lectura | V1 inspección de cuerpo estructurado; todavía sin diffs renderizados por archivo/hunk |
+| Skills ejecutables | `skill/list` por sesión; `turn/start` tipo `skill` con selector validado y argumentos | El envío es **una llamada de inferencia cuando el usuario confirma**; nunca se invoca al cargar la interfaz |
+| Consulta Git/worktrees | `worktree/list` solo lectura, sin shell | Operación experimental/capability-gated; el host puede rechazarla |
+| Buscar en chat | Filtrado instantáneo de mensajes y actividad ya cargados | No indexa todas las sesiones remotas |
+| Centro de trabajo | Modal ampliado con pestañas Cola, Tareas, Cambios, Skills y Git | El diálogo de herramientas de sesión anterior sigue existiendo |
+
+Seguridad: el gateway solo usa endpoints MSP permitidos explícitamente en el puente; `task/list` y `worktree/list` fueron añadidos como **métodos read-only**. Ninguna prueba llama modelos o servicios de suscripción. Las funciones que pueden consumir cuota requieren una interacción y confirmación del usuario.
+
+## Segunda etapa (todavía NO implementada)
+
+1. **Diff renderizado de primera clase**: decodificar y validar documento `tool_patch`, agrupar archivos/hunks, colorear líneas, copy/compartir, carga paginada.
+2. **Sincronización cifrada entre dispositivos**: modelo de ownership por identidad de dispositivo, backups de metadatos con cifrado end-to-end, control de conflictos y revocación; no guardar borradores de código en texto plano.
+3. **Notificaciones Android**: permisos `POST_NOTIFICATIONS`, canales de aprobaciones y finalización, reconexión respetuosa con Doze, foreground service solo si hay una necesidad explícita, sin conexión permanente abusiva.
+4. **Búsqueda global**: índice local por sesión con ingestión paginada, opt-in para incluir contenido, presupuesto estricto de CPU/disco y exclusión de secretos.
+5. **Subagentes**: vista de `subagent` por ID, estado y resultados; acciones tipadas de seguimiento y cancelación con confirmación.
+6. **Worktrees mutables**: creación/checkout/remoción detrás de permisos restrictivos y confirmación, respetando límites de sandbox/trust del host, nunca `git` arbitrario por RPC.
+7. **Optimización del historial**: tamaño límite de batches en Compose, lazy snapshot restore y lectura incremental, métricas de scroll y RAM; pruebas de dispositivos de gama media.
+8. **Accesibilidad y navegación**: estados accesibles, pruebas TalkBack, mejor separación entre permisos, uso y productividad.
+
+## Control de release
+
+- Publicar QA solo tras CI en verde y firma estable verificada (`apksigner`).
+- No reiniciar el puente durante compilaciones/pruebas; aplicar cambios de servidor separadamente con respaldo y health check.
+- Mantener `.token`, `.lan.*`, `.vapid.json`, los proyectos/pines y la clave QA sin cambios.
+- Pruebas físicas y permisos reales de dispositivo siguen pendientes hasta que el usuario use la nueva beta.

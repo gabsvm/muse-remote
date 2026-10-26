@@ -42,6 +42,7 @@ class MuseController(
     private var listJob: Job? = null
     private var modelJob: Job? = null
     private var settingsJob: Job? = null
+    private var productivityJob: Job? = null
     private var toolsJob: Job? = null
     private var actionJob: Job? = null
     private var contributorJob: Job? = null
@@ -200,6 +201,15 @@ class MuseController(
         }
     }
 
+    fun draftFor(id: String?): String =
+        id?.let { credentials.drafts()[it] }.orEmpty()
+
+    fun saveDraft(id: String?, content: String) {
+        if (id == null || id.isBlank() || content.length > 20000) return
+        try { credentials.saveDraft(id, content) }
+        catch (_: Exception) { reportError("No se pudo guardar el borrador cifrado.") }
+    }
+
     fun createProject(name: String, workspace: String = "") {
         val normalized = name.trim().take(64)
         if (normalized.isBlank()) { reportError("Escribe el nombre del proyecto."); return }
@@ -336,6 +346,10 @@ class MuseController(
                 approvalMode = null, toolsLoading = false, toolsSaving = false,
                 toolsError = null, usage = null, skills = emptyList(),
                 usageDiagnosis = null, usageChecking = false,
+                queuedInputs = emptyList(), queuedSubmitted = emptyList(), queueBusy = false,
+                worktrees = emptyList(), worktreeLoading = false, worktreeError = null,
+                tasks = emptyList(), tasksLoading = false, tasksError = null,
+                patches = emptyList(), patchPreview = null, patchBusy = false, patchError = null,
                 modelSettingsSaving = false, modelSettingsError = null,
                 items = emptyList(), approvals = emptyList(), questions = emptyList(),
                 loading = true, sessionReady = false, sessionBusyElsewhere = false,
@@ -404,6 +418,7 @@ class MuseController(
                 }
                 credentials.saveRecentSession(id)
                 mergeHistory(result.obj("history"), seq)
+                updateSnapshotExtras(result, seq)
                 if (seq != generation) return@launch
                 startConnection(id, seq)
                 refreshPending(id, seq)
@@ -464,6 +479,8 @@ class MuseController(
                 modelSettingsLoading = false, modelSettingsSaving = false, modelSettingsError = null,
                 approvalMode = null, toolsLoading = false, toolsSaving = false,
                 toolsError = null, usage = null, skills = emptyList(),
+                queuedInputs = emptyList(), queuedSubmitted = emptyList(),
+                tasks = emptyList(), patches = emptyList(), patchPreview = null,
                 turnId = null, viewCursor = null, stream = "PC conectada", error = null)
         }
         refreshSessions()
@@ -562,8 +579,17 @@ class MuseController(
                 if (seq != generation) return@launch
                 val id = gateway.commandId()
                 if (seq != generation) return@launch
-                gateway.send(sid, content, id, attachment as? ComposerAttachment.Photo, file)
-                if (seq == generation) mutable.update { it.copy(sending = false, working = true) }
+                val admission = gateway.send(sid, content, id, attachment as? ComposerAttachment.Photo, file)
+                if (seq == generation) mutable.update { current ->
+                    val turnId = admission.string("turnId")
+                    val queued = admission.string("disposition") == "queued" && !turnId.isNullOrBlank()
+                    current.copy(
+                        sending = false,
+                        working = current.working || admission.string("disposition") == "started",
+                        queuedSubmitted = if (queued) current.queuedSubmitted +
+                            PendingSubmit(turnId!!, content.take(150)) else current.queuedSubmitted,
+                    )
+                }
                 delay(1500)
                 if (seq == generation) syncOnce(sid, seq)
             } catch (cancel: CancellationException) {
@@ -574,6 +600,145 @@ class MuseController(
                         error = "No se confirmó el envío: ${t.message}. " +
                             "Conserva el adjunto y comprueba el historial antes de reintentar.")
                 }
+            }
+        }
+    }
+
+    /** Only cancel a queued turn whose authoritative turnId we received from turn/start. */
+    fun cancelQueued(turnId: String) {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        if (!c.sessionReady || c.queueBusy || c.queuedSubmitted.none { it.turnId == turnId }) return
+        val seq = generation
+        mutable.update { it.copy(queueBusy = true, error = null) }
+        productivityJob = scope.launch {
+            try {
+                gateway.unqueue(sid, turnId)
+                if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                    it.copy(queueBusy = false, queuedSubmitted =
+                        it.queuedSubmitted.filterNot { q -> q.turnId == turnId })
+                }
+                if (seq == generation) syncOnce(sid, seq)
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(queueBusy = false, error =
+                        "Muse no confirmó la cancelación; comprobá si el turno ya comenzó.") }
+            }
+        }
+    }
+
+    fun refreshWorktrees() {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        if (!c.sessionReady || c.worktreeLoading) return
+        val seq = generation
+        mutable.update { it.copy(worktreeLoading = true, worktreeError = null) }
+        productivityJob = scope.launch {
+            try {
+                val data = gateway.listWorktrees(c.workspace)
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(worktreeLoading = false, worktrees = data) }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(worktreeLoading = false,
+                        worktreeError = "Esta versión del host no admite consultar worktrees, o la carpeta no pertenece a Git.") }
+            }
+        }
+    }
+
+    fun refreshProductivity() {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        if (!c.sessionReady || c.tasksLoading) return
+        val seq = generation
+        mutable.update { it.copy(tasksLoading = true, tasksError = null) }
+        productivityJob = scope.launch {
+            try {
+                val items = gateway.listTasks(sid)
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(tasks = items, tasksLoading = false) }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(tasksLoading = false,
+                        tasksError = "El host no admite inventario de tareas o está desconectado.") }
+            }
+        }
+    }
+
+    fun stopBackgroundTask(taskId: String) {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        if (!c.sessionReady || c.tasksLoading ||
+            c.tasks.none { it.taskId == taskId && it.mode == "background" }) return
+        val seq = generation
+        mutable.update { it.copy(tasksLoading = true, tasksError = null) }
+        productivityJob = scope.launch {
+            try {
+                gateway.stopTask(sid, taskId)
+                if (seq == generation) {
+                    mutable.update { it.copy(tasksLoading = false) }
+                    refreshProductivity()
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                if (seq == generation) mutable.update {
+                    it.copy(tasksLoading = false, tasksError = "Muse no confirmó detener la tarea.")
+                }
+            }
+        }
+    }
+
+    fun fetchPatch(itemId: String, refId: String) {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        if (!c.sessionReady || c.patchBusy ||
+            c.patches.none { it.itemId == itemId && it.refId == refId }) return
+        val seq = generation
+        mutable.update { it.copy(patchBusy = true, patchError = null, patchPreview = null) }
+        productivityJob = scope.launch {
+            try {
+                val raw = gateway.patchText(sid, itemId, refId)
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(patchBusy = false, patchPreview = raw) }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(patchBusy = false,
+                        patchError = "No se pudo cargar el diff desde Muse.") }
+            }
+        }
+    }
+
+    fun dismissPatch() {
+        mutable.update { it.copy(patchPreview = null, patchError = null) }
+    }
+
+    fun runSkill(selector: String, arguments: String) {
+        val c = mutable.value
+        val sid = c.sessionId ?: return
+        if (!c.sessionReady || c.sending || c.skills.none { it.selector == selector }) return
+        val seq = generation
+        mutable.update { it.copy(sending = true, error = null) }
+        scope.launch {
+            try {
+                val ack = gateway.invokeSkill(sid, selector, arguments)
+                if (seq == generation && mutable.value.sessionId == sid) mutable.update {
+                    it.copy(sending = false, working = it.working ||
+                        ack.string("disposition") == "started",
+                        queuedSubmitted = if (ack.string("disposition") == "queued" &&
+                            !ack.string("turnId").isNullOrBlank())
+                            it.queuedSubmitted + PendingSubmit(
+                                ack.string("turnId")!!, "/" + selector + " " + arguments.take(110))
+                        else it.queuedSubmitted)
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(sending = false,
+                        error = "Muse rechazó la skill. Verificá el catálogo y el estado del turno.") }
             }
         }
     }
@@ -817,6 +982,7 @@ class MuseController(
             val response = gateway.read(sid)
             if (seq != generation) return
             mergeHistory(response.obj("history"), seq)
+            updateSnapshotExtras(response, seq)
             val session = response.obj("session")
             if (session != null) mutable.update {
                 it.copy(working = session.string("status") == "running",
@@ -844,6 +1010,16 @@ class MuseController(
             mutable.update { it.copy(approvals = list) }
         } catch (cancel: CancellationException) { throw cancel }
         catch (_: Exception) { /* old MSP may not expose pending approvals */ }
+    }
+
+    private fun updateSnapshotExtras(snapshot: JsonObject, seq: Long) {
+        if (seq != generation) return
+        val queue = snapshot.array("queuedInputs").orEmpty()
+            .mapNotNull { (it as? JsonObject)?.let(QueuedEntry::from) }
+        val rawItems = snapshot.obj("history")?.array("items").orEmpty()
+        val patches = rawItems.mapNotNull { (it as? JsonObject)?.let(PatchItem::from) }
+        mutable.update { it.copy(queuedInputs = queue,
+            patches = (it.patches + patches).distinctBy(PatchItem::itemId).takeLast(100)) }
     }
 
     private fun mergeHistory(history: JsonObject?, seq: Long) {
@@ -907,6 +1083,11 @@ class MuseController(
             "item/started", "item/updated", "item/completed" -> {
                 val item = p.obj("item")?.let(ChatItem::from) ?: return
                 upsert(item, seq)
+                p.obj("item")?.let(PatchItem::from)?.let { patch ->
+                    mutable.update { it.copy(patches =
+                        (it.patches.filterNot { x -> x.itemId == patch.itemId } + patch)
+                            .takeLast(100)) }
+                }
             }
             "item/delta" -> {
                 val id = p.string("itemId") ?: return
@@ -921,7 +1102,13 @@ class MuseController(
                 }
             }
             "turn/started" -> mutable.update {
-                it.copy(working = true, turnId = p.string("turnId") ?: it.turnId)
+                val startedId = p.string("turnId")
+                it.copy(working = true, turnId = startedId ?: it.turnId,
+                    queuedSubmitted = it.queuedSubmitted.filterNot { q -> q.turnId == startedId })
+            }
+            "turn/unqueued" -> mutable.update {
+                it.copy(queuedSubmitted =
+                    it.queuedSubmitted.filterNot { q -> q.turnId == p.string("turnId") })
             }
             "turn/completed", "turn/retracted" -> mutable.update {
                 if (p.string("turnId") == null || it.turnId == null || p.string("turnId") == it.turnId)
@@ -955,7 +1142,7 @@ class MuseController(
 
     private fun cancelConversation() {
         openJob?.cancel(); streamJob?.cancel(); syncJob?.cancel(); watchdogJob?.cancel()
-        modelJob?.cancel(); settingsJob?.cancel(); contributorJob?.cancel(); toolsJob?.cancel(); actionJob?.cancel()
+        modelJob?.cancel(); settingsJob?.cancel(); contributorJob?.cancel(); toolsJob?.cancel(); actionJob?.cancel(); productivityJob?.cancel()
         openJob = null; streamJob = null; syncJob = null; watchdogJob = null
     }
 

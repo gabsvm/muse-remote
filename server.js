@@ -70,8 +70,8 @@ const ALLOWED_METHODS = new Set([
   'session/setReasoningEffort', 'session/setApprovalMode', 'session/userShell',
   'turn/start', 'turn/steer', 'turn/unqueue', 'turn/interrupt',
   'view/page', 'view/subscribe',
-  'model/list', 'skill/list', 'usage/read',
-  'item/readOutput',
+  'model/list', 'skill/list', 'usage/read', 'task/list',
+  'item/readOutput', 'worktree/list',
   'task/background', 'task/stop',
   'subagent/sendMessage', 'subagent/followupTask', 'subagent/stop',
   'approval/decide', 'approval/listPending',
@@ -474,7 +474,7 @@ async function handle(req, res) {
   const pathname = u.pathname;
 
   if (req.method === 'GET' && pathname === '/api/health') {
-    return sendJson(res, 200, { ok: true, mspReady: msp.ready, ...(authorized(req) ? { serverInfo: msp.serverInfo } : {}), version: '0.2.0-beta.6', features: { fileUpload: true, contributor: true, usageDiagnostics: true } });
+    return sendJson(res, 200, { ok: true, mspReady: msp.ready, ...(authorized(req) ? { serverInfo: msp.serverInfo } : {}), version: '0.2.0-beta.7', features: { fileUpload: true, contributor: true, usageDiagnostics: true } });
   }
   if (pathname === '/api/usage-diagnostics' && req.method === 'GET') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });

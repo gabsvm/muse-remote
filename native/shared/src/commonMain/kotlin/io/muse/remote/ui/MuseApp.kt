@@ -596,10 +596,24 @@ private fun ConversationScene(
     pickImage: (((PickedAttachment) -> Unit) -> Unit)?,
     pickDocument: (((PickedAttachment) -> Unit) -> Unit)?,
 ) {
-    var input by remember(state.sessionId) { mutableStateOf("") }
+    var input by remember(state.sessionId) {
+        mutableStateOf(controller.draftFor(state.sessionId))
+    }
+    val currentDraft by rememberUpdatedState(input)
+    DisposableEffect(state.sessionId) {
+        val draftSessionId = state.sessionId
+        onDispose { controller.saveDraft(draftSessionId, currentDraft) }
+    }
+    LaunchedEffect(state.sessionId, input) {
+        delay(400)
+        controller.saveDraft(state.sessionId, input)
+    }
     var attachment by remember(state.sessionId) { mutableStateOf<PickedAttachment?>(null) }
     var attachmentMenu by remember { mutableStateOf(false) }
     var showTools by remember(state.sessionId) { mutableStateOf(false) }
+    var showWorkflows by remember(state.sessionId) { mutableStateOf(false) }
+    var showSearch by remember(state.sessionId) { mutableStateOf(false) }
+    var searchInChat by remember(state.sessionId) { mutableStateOf("") }
     var showRename by remember(state.sessionId) { mutableStateOf(false) }
     var sendAsSteer by remember(state.sessionId) { mutableStateOf(false) }
     LaunchedEffect(state.turnId, state.working, attachment) {
@@ -612,6 +626,7 @@ private fun ConversationScene(
         if (pendingSend && !state.sending) {
             if (state.error == null) {
                 input = ""
+                controller.saveDraft(state.sessionId, "")
                 attachment = null
             }
             pendingSend = false
@@ -619,7 +634,18 @@ private fun ConversationScene(
     }
     val list = rememberLazyListState()
     val scrollScope = rememberCoroutineScope()
-    val entries = remember(state.items) { conversationEntries(state.items) }
+    val allEntries = remember(state.items) { conversationEntries(state.items) }
+    val entries = remember(allEntries, searchInChat) {
+        if (searchInChat.isBlank()) allEntries else allEntries.filter { entry ->
+            when (entry) {
+                is ConversationEntry.Message -> entry.item.text.contains(searchInChat, true)
+                is ConversationEntry.Activity -> entry.steps.any { step ->
+                    step.text.contains(searchInChat, true) ||
+                        step.toolName.contains(searchInChat, true)
+                }
+            }
+        }
+    }
     // A new conversation should always start at the latest message.
     // Disable following only when the person intentionally drags the list
     // away from its tail. New incoming events must not steal their scroll.
@@ -670,12 +696,42 @@ private fun ConversationScene(
                     maxLines = 1)
             }
             StreamChip(state.stream)
+            IconButton(onClick = {
+                showSearch = !showSearch
+                if (!showSearch) searchInChat = ""
+                else followTail = false
+            }) {
+                Icon(Icons.Default.Search, contentDescription = "Buscar en conversación")
+            }
+            if (state.sessionReady) IconButton(onClick = {
+                controller.refreshSessionTools()
+                controller.refreshProductivity()
+                showWorkflows = true
+            }) {
+                Icon(Icons.Default.SpaceDashboard,
+                    contentDescription = "Centro de trabajo")
+            }
             if (state.sessionReady) IconButton(onClick = {
                 controller.refreshSessionTools()
                 showTools = true
             }) {
                 Icon(Icons.Default.Tune, contentDescription = "Herramientas de la sesión")
             }
+        }
+        if (showSearch) {
+            OutlinedTextField(
+                value = searchInChat,
+                onValueChange = { searchInChat = it.take(120); followTail = false },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                label = { Text("Buscar dentro de este chat") },
+                leadingIcon = { Icon(Icons.Default.Search, null) },
+                trailingIcon = { IconButton(onClick = {
+                    searchInChat = ""; showSearch = false; followTail = true
+                }) { Icon(Icons.Default.Close, contentDescription = "Cerrar búsqueda") } },
+                singleLine = true,
+            )
+            Text("${entries.size} resultados cargados", Modifier.padding(horizontal = 14.dp),
+                style = MaterialTheme.typography.labelSmall)
         }
         HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.22f))
         if (state.sessionReady) {
@@ -870,7 +926,7 @@ private fun ConversationScene(
             }
             OutlinedTextField(
                 value = input,
-                onValueChange = { input = it },
+                onValueChange = { input = it.take(20000) },
                 modifier = Modifier.weight(1f),
                 placeholder = { Text(if (state.working && sendAsSteer) "Instrucción para el turno activo…"
                     else if (state.working) "Enviar a la cola…" else "Escribí a Muse…") },
@@ -903,6 +959,8 @@ private fun ConversationScene(
             }
         }
     }
+    if (showWorkflows) WorkflowPanel(state, controller,
+        onDismiss = { showWorkflows = false })
     if (showTools) SessionToolsDialog(state, controller, onDismiss = { showTools = false })
     ErrorPopup(state.error, controller::dismissError)
 }

@@ -112,6 +112,34 @@ class AndroidCredentialsStore(context: Context) : CredentialsStore {
         }
     }
 
+    /** Encrypted at rest with the same non-exportable Android Keystore key used for pairing. */
+    override fun drafts(): Map<String, String> = runCatching {
+        val iv = organizer.getString("drafts_iv", null) ?: return@runCatching emptyMap()
+        val payload = organizer.getString("drafts_cipher", null) ?: return@runCatching emptyMap()
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, decode(iv)))
+        val raw = JSONObject(String(cipher.doFinal(decode(payload)), Charsets.UTF_8))
+        raw.keys().asSequence().take(200).mapNotNull { id ->
+            val text = raw.optString(id)
+            if (id.isBlank() || text.isBlank() || text.length > 20000) null else id to text
+        }.toMap()
+    }.getOrDefault(emptyMap())
+
+    override fun saveDraft(sessionId: String, content: String) {
+        require(sessionId.isNotBlank() && content.length <= 20000)
+        val updated = drafts().toMutableMap()
+        if (content.isBlank()) updated.remove(sessionId) else updated[sessionId] = content
+        val json = JSONObject()
+        updated.entries.take(200).forEach { (id, text) -> json.put(id, text) }
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, key())
+        val data = cipher.doFinal(json.toString().toByteArray(Charsets.UTF_8))
+        check(organizer.edit().putString("drafts_iv", encode(cipher.iv))
+            .putString("drafts_cipher", encode(data)).commit()) {
+            "No se pudo guardar el borrador cifrado."
+        }
+    }
+
     override fun sessionAliases(): Map<String, String> = runCatching {
         val raw = JSONObject(organizer.getString("session_aliases", "{}") ?: "{}")
         raw.keys().asSequence().take(10000).mapNotNull { id ->

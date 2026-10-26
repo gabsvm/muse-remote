@@ -56,6 +56,8 @@ interface CredentialsStore {
     fun projectAssignments(): Map<String, String> = emptyMap()
     fun saveProjectAssignments(value: Map<String, String>) {}
     /** Android-local session aliases until session/rename is supported by Muse on Windows. */
+    fun drafts(): Map<String, String> = emptyMap()
+    fun saveDraft(sessionId: String, content: String) {}
     fun sessionAliases(): Map<String, String> = emptyMap()
     fun saveSessionAliases(value: Map<String, String>) {}
     fun pinnedSessionIds(): Set<String> = emptySet()
@@ -70,6 +72,7 @@ class MemoryCredentialsStore : CredentialsStore {
     private var session: String? = null
     private val projectList = mutableListOf<RemoteProject>()
     private val assignments = mutableMapOf<String, String>()
+    private val draftMap = mutableMapOf<String, String>()
     private val aliases = mutableMapOf<String, String>()
     private val pinned = mutableSetOf<String>()
     private val hidden = mutableSetOf<String>()
@@ -82,6 +85,11 @@ class MemoryCredentialsStore : CredentialsStore {
     override fun saveProjects(value: List<RemoteProject>) { projectList.clear(); projectList.addAll(value) }
     override fun projectAssignments(): Map<String, String> = assignments.toMap()
     override fun saveProjectAssignments(value: Map<String, String>) { assignments.clear(); assignments.putAll(value) }
+    override fun drafts(): Map<String, String> = draftMap.toMap()
+    override fun saveDraft(sessionId: String, content: String) {
+        if (content.isBlank()) draftMap.remove(sessionId)
+        else draftMap[sessionId] = content
+    }
     override fun sessionAliases(): Map<String, String> = aliases.toMap()
     override fun saveSessionAliases(value: Map<String, String>) { aliases.clear(); aliases.putAll(value) }
     override fun pinnedSessionIds(): Set<String> = pinned.toSet()
@@ -270,6 +278,49 @@ data class SubscriptionSnapshot(
         }
     }
 }
+data class QueuedEntry(val sequence: Long, val text: String) {
+    companion object {
+        fun from(x: JsonObject): QueuedEntry? {
+            val sequence = (x["sequence"] as? JsonPrimitive)?.longOrNull ?: return null
+            return QueuedEntry(sequence, x.string("text").orEmpty())
+        }
+    }
+}
+data class PendingSubmit(val turnId: String, val text: String)
+data class RemoteTask(val taskId: String, val title: String, val mode: String) {
+    companion object {
+        fun from(x: JsonObject): RemoteTask? {
+            val id = x.string("taskId")?.takeIf(String::isNotBlank) ?: return null
+            return RemoteTask(id, (x.string("tool") ?: x.string("kind") ?: "Tarea").take(100),
+                x.string("executionMode") ?: "background")
+        }
+    }
+}
+data class WorktreeRow(val path: String, val branch: String,
+    val main: Boolean, val activeSessions: Int) {
+    companion object {
+        fun from(x: JsonObject): WorktreeRow? {
+            val path = x.string("path")?.takeIf(String::isNotBlank) ?: return null
+            return WorktreeRow(path, x.string("branch").orEmpty(),
+                (x["isMain"] as? JsonPrimitive)?.booleanOrNull ?: false,
+                x.array("sessionIds").orEmpty().size)
+        }
+    }
+}
+data class PatchItem(val itemId: String, val refId: String, val files: Int,
+    val added: Int, val removed: Int) {
+    companion object {
+        fun from(x: JsonObject): PatchItem? {
+            val ref = x.obj("patchRef")?.string("id") ?: return null
+            val id = x.string("itemId") ?: return null
+            val summary = x.obj("patchSummary")
+            return PatchItem(id, ref,
+                (summary?.get("files") as? JsonPrimitive)?.intOrNull ?: 0,
+                (summary?.get("added") as? JsonPrimitive)?.intOrNull ?: 0,
+                (summary?.get("removed") as? JsonPrimitive)?.intOrNull ?: 0)
+        }
+    }
+}
 data class MuseSkill(val selector: String, val title: String, val description: String) {
     companion object {
         fun from(raw: JsonObject): MuseSkill? {
@@ -323,6 +374,19 @@ data class MuseState(
     val usageDiagnosis: String? = null,
     val usageChecking: Boolean = false,
 
+    val queuedInputs: List<QueuedEntry> = emptyList(),
+    val queuedSubmitted: List<PendingSubmit> = emptyList(),
+    val queueBusy: Boolean = false,
+    val worktrees: List<WorktreeRow> = emptyList(),
+    val worktreeLoading: Boolean = false,
+    val worktreeError: String? = null,
+    val tasks: List<RemoteTask> = emptyList(),
+    val tasksLoading: Boolean = false,
+    val tasksError: String? = null,
+    val patches: List<PatchItem> = emptyList(),
+    val patchPreview: String? = null,
+    val patchBusy: Boolean = false,
+    val patchError: String? = null,
     val skills: List<MuseSkill> = emptyList(),
 
     val workspace: String = "",
