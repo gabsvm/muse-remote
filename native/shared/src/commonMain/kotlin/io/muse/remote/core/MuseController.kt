@@ -349,6 +349,7 @@ class MuseController(
                 queuedInputs = emptyList(), queuedSubmitted = emptyList(), queueBusy = false,
                 worktrees = emptyList(), worktreeLoading = false, worktreeError = null,
                 tasks = emptyList(), tasksLoading = false, tasksError = null,
+                subagents = emptyList(), subagentBusy = false, subagentError = null,
                 patches = emptyList(), patchPreview = null, patchBusy = false, patchError = null,
                 modelSettingsSaving = false, modelSettingsError = null,
                 items = emptyList(), approvals = emptyList(), questions = emptyList(),
@@ -624,6 +625,33 @@ class MuseController(
                 if (seq == generation && mutable.value.sessionId == sid)
                     mutable.update { it.copy(queueBusy = false, error =
                         "Muse no confirmó la cancelación; comprobá si el turno ya comenzó.") }
+            }
+        }
+    }
+
+    /** A user-confirmed child action; never run on reading an agent status. */
+    fun controlSubagent(id: String, action: String, body: String) {
+        val current = mutable.value
+        val sid = current.sessionId ?: return
+        val child = current.subagents.firstOrNull { it.subagentId == id } ?: return
+        if (!current.sessionReady || current.subagentBusy ||
+            action !in setOf("subagent/stop", "subagent/sendMessage", "subagent/followupTask") ||
+            (action == "subagent/stop" && !child.running) ||
+            (action != "subagent/stop" && body.trim().isEmpty())) return
+        val seq = generation
+        mutable.update { it.copy(subagentBusy = true, subagentError = null) }
+        scope.launch {
+            try {
+                gateway.subagentAction(sid, id, action, body)
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(subagentBusy = false,
+                        subagentError = "Muse aceptó la solicitud; esperá la actualización del subagente.") }
+                if (seq == generation) syncOnce(sid, seq)
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) {
+                if (seq == generation && mutable.value.sessionId == sid)
+                    mutable.update { it.copy(subagentBusy = false,
+                        subagentError = "Muse no confirmó la acción del subagente.") }
             }
         }
     }
@@ -1016,17 +1044,23 @@ class MuseController(
         if (seq != generation) return
         val queue = snapshot.array("queuedInputs").orEmpty()
             .mapNotNull { (it as? JsonObject)?.let(QueuedEntry::from) }
-        val rawItems = snapshot.obj("history")?.array("items").orEmpty()
-        val patches = rawItems.mapNotNull { (it as? JsonObject)?.let(PatchItem::from) }
-        mutable.update { it.copy(queuedInputs = queue,
-            patches = (it.patches + patches).distinctBy(PatchItem::itemId).takeLast(100)) }
+        val rawItems = historyItemObjects(snapshot.obj("history"))
+        val patches = rawItems.mapNotNull(PatchItem::from)
+        val agents = rawItems.mapNotNull(SubagentRow::from)
+        mutable.update { previous ->
+            previous.copy(queuedInputs = queue,
+                patches = (previous.patches.filterNot { old ->
+                    patches.any { fresh -> fresh.itemId == old.itemId }
+                } + patches).takeLast(100),
+                subagents = (previous.subagents.filterNot { old ->
+                    agents.any { fresh -> fresh.subagentId == old.subagentId }
+                } + agents).takeLast(100))
+        }
     }
 
     private fun mergeHistory(history: JsonObject?, seq: Long) {
         if (history == null || seq != generation) return
-        val incoming = history.array("items").orEmpty().mapNotNull {
-            (it as? JsonObject)?.let(ChatItem::from)
-        }
+        val incoming = historyItemObjects(history).mapNotNull(ChatItem::from)
         if (incoming.isNotEmpty()) mutable.update { previous ->
             val merged = linkedMapOf<String, ChatItem>()
             previous.items.forEach { merged[it.id] = it }
@@ -1086,6 +1120,11 @@ class MuseController(
                 p.obj("item")?.let(PatchItem::from)?.let { patch ->
                     mutable.update { it.copy(patches =
                         (it.patches.filterNot { x -> x.itemId == patch.itemId } + patch)
+                            .takeLast(100)) }
+                }
+                p.obj("item")?.let(SubagentRow::from)?.let { agent ->
+                    mutable.update { it.copy(subagents =
+                        (it.subagents.filterNot { x -> x.subagentId == agent.subagentId } + agent)
                             .takeLast(100)) }
                 }
             }

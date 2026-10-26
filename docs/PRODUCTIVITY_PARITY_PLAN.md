@@ -34,3 +34,12 @@ Seguridad: el gateway solo usa endpoints MSP permitidos explícitamente en el pu
 - No reiniciar el puente durante compilaciones/pruebas; aplicar cambios de servidor separadamente con respaldo y health check.
 - Mantener `.token`, `.lan.*`, `.vapid.json`, los proyectos/pines y la clave QA sin cambios.
 - Pruebas físicas y permisos reales de dispositivo siguen pendientes hasta que el usuario use la nueva beta.
+
+## Segundo bloque: interfaz de revisión y subagentes (beta.8)
+
+- **Parches por archivo y líneas**: nuevo parser acotado para unified diff y representación JSON \`{files:[{path,hunks:[{lines:[...]}]}]}\`. Lista de archivos con recuentos de adiciones/eliminaciones y lectura coloreada con selección de texto. Los parches de formato desconocido **se muestran en bruto**, sin inventar hunks.
+- **Subagentes**: se extraen únicamente ítems \`kind=subagent\` con \`subagentId\` explícito, incluyendo nombre, estado y resultado. Sexta pestaña de Centro de trabajo: **Agentes**. \`subagent/sendMessage\`, \`subagent/followupTask\` y \`subagent/stop\` dirigidos al ID opaco confirmado, con confirmación y advertencia sobre posible consumo de cuota.
+- **Historial compactado**: \`history.snapshot.state.items\` ahora se trata igual que \`history.items\` para el historial y la recuperación de metadatos. Las revisiones nuevas de parches/subagentes sustituyen a las antiguas por ID; las notificaciones \`item/started\`, \`item/updated\` y \`item/completed\` se incorporan.
+- No requiere actualizar el backend beta.7: ya estaban autorizados los RPC de subagentes y \`item/readOutput\`.
+- La búsqueda global indexada, sincronización, notificaciones Android/Doze, worktrees editables y pruebas en dispositivo físico siguen pendientes.
+- Toda ejecución potencial de un modelo requiere interacción explícita en la app. Los tests son MockEngine y parser puro; no llaman a suscripciones.

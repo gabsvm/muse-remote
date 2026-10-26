@@ -53,7 +53,7 @@ internal fun WorkflowPanel(
                 }
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("Cola", "Tareas", "Cambios", "Skills", "Git").forEachIndexed { n, name ->
+                    listOf("Cola", "Tareas", "Cambios", "Skills", "Git", "Agentes").forEachIndexed { n, name ->
                         FilterChip(selected = tab == n, onClick = { tab = n },
                             label = { Text(name) })
                     }
@@ -136,13 +136,7 @@ internal fun WorkflowPanel(
                             Text(it, color = MaterialTheme.colorScheme.error)
                         }
                         if (state.patchPreview != null) {
-                            TextButton(onClick = controller::dismissPatch) { Text("Volver a los cambios") }
-                            SelectionContainer {
-                                Box(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
-                                    Text(state.patchPreview, fontFamily = FontFamily.Monospace,
-                                        style = MaterialTheme.typography.bodySmall)
-                                }
-                            }
+                            DiffReviewPane(state.patchPreview, onBack = controller::dismissPatch)
                         } else {
                             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 if (state.patches.isEmpty()) item {
@@ -190,7 +184,7 @@ internal fun WorkflowPanel(
                             }
                         }
                     }
-                    else -> {
+                    4 -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text("Worktrees Git", Modifier.weight(1f),
                                 style = MaterialTheme.typography.titleSmall)
@@ -223,6 +217,7 @@ internal fun WorkflowPanel(
                             }
                         }
                     }
+                    else -> SubagentsPane(state, controller)
                 }
             }
         }
