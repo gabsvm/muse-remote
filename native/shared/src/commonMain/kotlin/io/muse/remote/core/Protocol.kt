@@ -10,6 +10,15 @@ fun JsonObject.string(key: String): String? =
 fun JsonObject.obj(key: String): JsonObject? = get(key) as? JsonObject
 fun JsonObject.array(key: String): JsonArray? = get(key) as? JsonArray
 
+/** MSP inline history or compacted snapshot (SS2.5.2). Unknown rungs yield none. */
+fun historyItemObjects(history: JsonObject?): List<JsonObject> {
+    val served = history?.array("items")
+        ?: history?.obj("snapshot")?.obj("state")?.array("items")
+        ?: return emptyList()
+    return served.mapNotNull { it as? JsonObject }
+}
+
+
 data class ServerCredentials(
     val url: String,
     val token: String,
@@ -307,6 +316,36 @@ data class WorktreeRow(val path: String, val branch: String,
         }
     }
 }
+data class SubagentRow(
+    val itemId: String,
+    val subagentId: String,
+    val name: String,
+    val status: String,
+    val controlStatus: String,
+    val summary: String,
+    val resultText: String,
+    val artifactCount: Int,
+) {
+    val running: Boolean get() = status == "inProgress"
+    companion object {
+        fun from(x: JsonObject): SubagentRow? {
+            if (x.string("kind") != "subagent") return null
+            val id = x.string("itemId")?.takeIf(String::isNotBlank) ?: return null
+            val child = x.string("subagentId")?.takeIf(String::isNotBlank) ?: return null
+            val result = x.obj("result")
+            return SubagentRow(
+                id, child,
+                (x.string("agentPath")?.substringAfterLast('/')?.substringAfterLast('\\')
+                    ?: "Subagente").take(90),
+                x.string("status").orEmpty(),
+                x.string("controlStatus").orEmpty(),
+                result?.string("summary").orEmpty().take(2000),
+                result?.string("text").orEmpty().take(10000),
+                result?.array("artifactRefs").orEmpty().size,
+            )
+        }
+    }
+}
 data class PatchItem(val itemId: String, val refId: String, val files: Int,
     val added: Int, val removed: Int) {
     companion object {
@@ -383,6 +422,9 @@ data class MuseState(
     val tasks: List<RemoteTask> = emptyList(),
     val tasksLoading: Boolean = false,
     val tasksError: String? = null,
+    val subagents: List<SubagentRow> = emptyList(),
+    val subagentBusy: Boolean = false,
+    val subagentError: String? = null,
     val patches: List<PatchItem> = emptyList(),
     val patchPreview: String? = null,
     val patchBusy: Boolean = false,

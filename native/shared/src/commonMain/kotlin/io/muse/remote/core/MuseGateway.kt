@@ -201,6 +201,25 @@ class MuseGateway(
             "\n\n[Vista parcial; diff almacenado más largo]" else ""
     }
 
+    /** Narrow commands: never guess the child's ID or operate on the parent session. */
+    suspend fun subagentAction(
+        sessionId: String,
+        subagentId: String,
+        action: String,
+        body: String = "",
+    ) {
+        require(sessionId.isNotBlank() && subagentId.isNotBlank())
+        require(action in setOf("subagent/stop", "subagent/sendMessage", "subagent/followupTask"))
+        if (action != "subagent/stop") require(body.trim().isNotBlank() &&
+            body.length <= 8000)
+        rpc(action, buildJsonObject {
+            put("commandId", commandId())
+            put("sessionId", sessionId)
+            put("subagentId", subagentId)
+            if (action != "subagent/stop") put("body", body.trim())
+        })
+    }
+
     /** Skill input requires an explicit user tap; never invoke from loading an inventory. */
     suspend fun invokeSkill(sessionId: String, selector: String, arguments: String): JsonObject {
         val valid = listSkills(sessionId).any { it.selector == selector }
