@@ -843,3 +843,8 @@ body[data-view="chatView"] .toast { bottom: calc(var(--composer-h) + 1.4rem + ma
   .pill::before, .conn::before, .dot { forced-color-adjust: none; }
   .btn, .icon-btn, .send-btn, .chip-btn, .tabs button { border: 1px solid ButtonText; }
 }
+
+.brand-lockup{display:flex;align-items:center;gap:8px;min-width:0}.brand-lockup img{width:28px;height:28px;border-radius:9px;flex:none}
+
+.login-brand{display:flex;align-items:center;justify-content:center;width:min(100%,320px);padding:12px;border-radius:20px;background:#081621;margin:4px 0 18px}
+.login-brand img{max-width:100%;height:auto;object-fit:contain}

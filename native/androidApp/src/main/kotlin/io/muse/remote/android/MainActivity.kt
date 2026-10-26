@@ -1,6 +1,14 @@
 package io.muse.remote.android
 
 import android.os.Bundle
+import android.os.Build
+import android.Manifest
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import android.net.Uri
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import androidx.activity.ComponentActivity
@@ -14,6 +22,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import io.muse.remote.ui.PickedAttachment
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.collectAsState
@@ -30,9 +40,29 @@ import io.muse.remote.core.MuseGateway
 import io.muse.remote.ui.MuseApp
 
 class MainActivity : ComponentActivity() {
+    @Volatile private var visible = false
+
+    override fun onStart() {
+        super.onStart()
+        visible = true
+    }
+
+    override fun onStop() {
+        visible = false
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            val notifier = remember { MuseLocalNotifier(applicationContext) }
+            var alertsEnabled by remember { mutableStateOf(notifier.enabled) }
+            val requestNotifications = rememberLauncherForActivityResult(
+                ActivityResultContracts.RequestPermission()
+            ) { granted ->
+                notifier.enabled = granted
+                alertsEnabled = notifier.enabled
+            }
             val discovery = remember { AndroidLanDiscovery(applicationContext) }
             val controller = remember {
                 MuseController(
@@ -54,7 +84,16 @@ class MainActivity : ComponentActivity() {
             }
             DisposableEffect(controller) {
                 discovery.start()
-                onDispose { discovery.stop(); controller.close() }
+                val watcher = lifecycleScope.launch {
+                    controller.state.collect { snapshot ->
+                        notifier.observe(snapshot, visible)
+                    }
+                }
+                onDispose {
+                    watcher.cancel()
+                    discovery.stop()
+                    controller.close()
+                }
             }
             val state by controller.state.collectAsState()
             BackHandler(enabled = state.screen == Screen.Conversation) {
@@ -86,7 +125,28 @@ class MainActivity : ComponentActivity() {
                 ActivityResultContracts.OpenDocument()
             ) { uri -> onSelected(uri, false) }
 
-            MuseApp(controller, discovery, scanPair = {
+            MuseApp(
+                controller, discovery,
+                brandArtwork = {
+                    Image(
+                        painter = painterResource(R.drawable.brand_logo_tile),
+                        contentDescription = null,
+                        modifier = Modifier.size(58.dp),
+                    )
+                },
+                notificationsEnabled = alertsEnabled,
+                onNotificationsChange = { enabled ->
+                    if (!enabled) {
+                        notifier.enabled = false
+                        alertsEnabled = false
+                    } else if (Build.VERSION.SDK_INT >= 33 && !notifier.permissionGranted()) {
+                        requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    } else {
+                        notifier.enabled = true
+                        alertsEnabled = notifier.enabled
+                    }
+                },
+                scanPair = {
                 GmsBarcodeScanning.getClient(this@MainActivity).startScan()
                     .addOnSuccessListener { barcode ->
                         try {
