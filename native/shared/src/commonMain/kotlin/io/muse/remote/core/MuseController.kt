@@ -41,6 +41,7 @@ class MuseController(
     private var started = false
     private var listJob: Job? = null
     private var globalSearchJob: Job? = null
+    private var globalSearchSequence = 0L
     private var modelJob: Job? = null
     private var settingsJob: Job? = null
     private var productivityJob: Job? = null
@@ -351,6 +352,7 @@ class MuseController(
             return
         }
         cancelGlobalSearch()
+        val searchSeq = globalSearchSequence
         val seq = generation
         val rows = snapshot.sessions.asSequence()
             .filter { includeHidden || it.id !in snapshot.hiddenSessionIds }
@@ -367,7 +369,8 @@ class MuseController(
             try {
                 for (session in rows) {
                     ensureActive()
-                    if (seq != generation || !mutable.value.authenticated) break
+                    if (seq != generation || searchSeq != globalSearchSequence ||
+                        !mutable.value.authenticated) break
                     try {
                         val snapshotRead = withTimeoutOrNull(8_000L) {
                             gateway.read(session.id)
@@ -384,13 +387,15 @@ class MuseController(
                 }
             } catch (cancel: CancellationException) { throw cancel }
             finally {
-                if (seq == generation && mutable.value.globalSearchBusy)
+                if (seq == generation && searchSeq == globalSearchSequence &&
+                    mutable.value.globalSearchBusy)
                     mutable.update { it.copy(globalSearchBusy = false) }
             }
         }
     }
 
     fun cancelGlobalSearch() {
+        globalSearchSequence++
         globalSearchJob?.cancel()
         globalSearchJob = null
         mutable.update { it.copy(globalSearchBusy = false, globalSearchDone = 0,
