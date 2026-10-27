@@ -133,7 +133,13 @@
       seq++;if(controller)controller.abort();
       controller=null;start.disabled=false;start.textContent='Buscar';
     }
-    function close() {stop();dialog.close();}
+    function purge() {
+      results.replaceChildren();
+      input.value='';
+      includeHidden.checked=false;
+      status.textContent='';
+    }
+    function close() {stop();purge();dialog.close();}
     trigger.addEventListener('click',()=> {
       if(!deps.listSessions()?.length){status.textContent='Actualizá la lista de sesiones para buscar.';}
       dialog.showModal();input.focus();
@@ -142,7 +148,7 @@
       if(controller){stop();status.textContent='Búsqueda cancelada.';}
       else close();
     });
-    dialog.addEventListener('close', stop);
+    dialog.addEventListener('close',()=>{stop();purge();});
     dialog.addEventListener('cancel', stop);
     input.addEventListener('keydown',e=>{
       if(e.key==='Enter'){e.preventDefault();start.click();}
