@@ -354,7 +354,7 @@ private fun SessionScene(
             )
             TextButton(onClick = { globalSearchDialog = true },
                 enabled = state.authenticated && state.sessions.isNotEmpty()) {
-                Icon(Icons.Default.ManageSearch, contentDescription = null,
+                Icon(Icons.Default.Search, contentDescription = null,
                     modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(7.dp))
                 Text("Buscar dentro de conversaciones")
