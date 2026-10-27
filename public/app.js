@@ -74,11 +74,12 @@ async function api(path, opts) {
   if (!j) throw new Error('respuesta inválida del backend (HTTP ' + r.status + ')');
   return { r, j };
 }
-async function rpc(method, params) {
+async function rpc(method, params, signal) {
   const { r, j } = await api('/api/rpc', {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + state.token },
     body: JSON.stringify({ method, params }),
+    ...(signal ? { signal } : {}),
   });
   // 503 = Muse aun arrancando: reintentable igual que un corte de red.
   if (!j.ok) throw Object.assign(new Error(friendlyError(j.error || ('rpc ' + r.status))), { network: r.status === 503 });
@@ -2617,6 +2618,15 @@ document.addEventListener('DOMContentLoaded', () => {
     state.showHidden = !state.showHidden;
     renderSessions();
   });
+  if (typeof window !== 'undefined' && window.MuseGlobalSearch) {
+    window.MuseGlobalSearch.attach({
+      listSessions: () => state.sessions,
+      hiddenIds: loadHidden,
+      readSession: (sessionId, signal) => rpc('session/read', { sessionId }, signal),
+      openSession: (sessionId) => openSession(sessionId, null,
+        (state.sessions || []).find(s => s.sessionId === sessionId)),
+    });
+  }
   let searchTimer = null;
   $('searchInput').addEventListener('input', (e) => {
     clearTimeout(searchTimer);
