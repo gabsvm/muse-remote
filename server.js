@@ -13,6 +13,8 @@ const { PushStore, pushForMsp } = require('./push');
 const { writeUpload, readUploadBody } = require('./uploads');
 const { readContributorSettings, saveContributorSettings } = require('./contributor');
 const { usageDiagnostics } = require('./usage-diagnostics');
+const { OrganizerSyncStore } = require('./organizer-sync-store');
+const organizerSync = new OrganizerSyncStore(process.env.MUSE_REMOTE_ORGANIZER_FILE);
 // A cached boot snapshot makes the pending-restart warning survive UI refreshes.
 const CONTRIBUTOR_BOOT_VALUE = readContributorSettings().value;
 function contributorReadStatus() {
@@ -474,7 +476,27 @@ async function handle(req, res) {
   const pathname = u.pathname;
 
   if (req.method === 'GET' && pathname === '/api/health') {
-    return sendJson(res, 200, { ok: true, mspReady: msp.ready, ...(authorized(req) ? { serverInfo: msp.serverInfo } : {}), version: '0.2.0-beta.10', features: { fileUpload: true, contributor: true, usageDiagnostics: true } });
+    return sendJson(res, 200, { ok: true, mspReady: msp.ready, ...(authorized(req) ? { serverInfo: msp.serverInfo } : {}), version: '0.2.0-beta.11', features: { fileUpload: true, contributor: true, usageDiagnostics: true } });
+  }
+  // E2EE relay: authenticated clients only. The server stores a versioned encrypted
+  // envelope and cannot see projects, pinned chats or passphrases.
+  if (pathname === '/api/organizer-sync' && (req.method === 'GET' || req.method === 'PUT')) {
+    if (!authorized(req)) return sendJson(res, 401, {ok: false, error: 'unauthorized'});
+    if (req.method === 'GET') {
+      try { return sendJson(res, 200, {ok: true, ...organizerSync.read()}); }
+      catch { return sendJson(res, 503, {ok:false, error:'backup unavailable'}); }
+    }
+    let body;
+    try { body = JSON.parse(await readBody(req, 280000)); }
+    catch (e) { return sendJson(res, isBodyTooLarge(e) ? 413 : 400,
+      {ok:false,error:'invalid encrypted backup'}); }
+    try {
+      const update = organizerSync.write(body.expectedRevision, body.envelope);
+      if (update.ok) return sendJson(res, 200, {ok:true,revision:update.revision});
+      if (update.reason === 'conflict') return sendJson(res, 409,
+        {ok:false,error:'revision conflict',revision:update.revision});
+      return sendJson(res, 400, {ok:false,error:'invalid encrypted backup'});
+    } catch { return sendJson(res, 503, {ok:false,error:'backup unavailable'}); }
   }
   if (pathname === '/api/usage-diagnostics' && req.method === 'GET') {
     if (!authorized(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' });

@@ -81,6 +81,31 @@ class MuseGateway(
         reason = raw.string("reason"),
     )
 
+    /** Read/write E2EE envelope only; no MSP turns or model usage. */
+    suspend fun getOrganizerSync(): JsonObject {
+        val c = auth()
+        val response = client.get(c.base + "/api/organizer-sync") {
+            header(HttpHeaders.Authorization, "Bearer " + c.token)
+        }
+        return requireSuccess(response.status.value, response.bodyAsText())
+    }
+
+    suspend fun putOrganizerSync(expectedRevision: Int, envelope: JsonObject): Int {
+        require(expectedRevision >= 0)
+        val c = auth()
+        val response = client.put(c.base + "/api/organizer-sync") {
+            header(HttpHeaders.Authorization, "Bearer " + c.token)
+            contentType(ContentType.Application.Json)
+            setBody(buildJsonObject {
+                put("expectedRevision", expectedRevision)
+                put("envelope", envelope)
+            }.toString())
+        }
+        return requireSuccess(response.status.value, response.bodyAsText())
+            .get("revision")?.jsonPrimitive?.intOrNull
+            ?: error("Falta confirmación de revisión.")
+    }
+
     suspend fun commandId(): String {
         val c = auth()
         val response = client.get(c.base + "/api/command-id") {

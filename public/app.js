@@ -306,6 +306,8 @@ function sortSessions(list) {
   return arr;
 }
 function sessTitle(s) {
+  const local = (typeof window !== 'undefined' && window.MuseOrganizerUI) ? window.MuseOrganizerUI.alias(s.sessionId) : null;
+  if (local) return local;
   const t = (s.name || s.firstUserPrompt || '').toString().trim().replace(/\s*\[Image #\d+\]/g, '').trim();
   if (t) return t.slice(0, 100);
   return 'Sesión ' + String(s.sessionId || '').slice(0, 8) + '…';
@@ -362,7 +364,8 @@ function filterSessions(list, opts) {
     const empty = isEmptySession(s);
     if (o.tab === 'empty' ? !empty : empty) return false;
     if (!q) return true;
-    const hay = [sessTitle(s), s.workspaceRoot || '', s.modelId || '', s.sessionId || ''].join(' ').toLowerCase();
+    const hay = [sessTitle(s), s.workspaceRoot || '', s.modelId || '', s.sessionId || '',
+      (typeof window !== 'undefined' && window.MuseOrganizerUI?.projectName(s.sessionId)) || ''].join(' ').toLowerCase();
     return hay.includes(q);
   });
   return { rows, nChats, nEmpty, nHidden };
@@ -435,9 +438,12 @@ function renderSessions() {
   const ul = $('sessionList');
   if (!state.sessions) return;
   const hidden = loadHidden();
-  const { rows, nChats, nEmpty, nHidden } = filterSessions(state.sessions, {
+  const { rows: rawRows, nChats, nEmpty, nHidden } = filterSessions(state.sessions, {
     hidden, showHidden: state.showHidden, tab: state.listTab, query: state.query,
   });
+  const org = typeof window !== 'undefined' ? window.MuseOrganizerUI : null;
+  const rows = org ? rawRows.sort((a,b)=>
+    Number(org.isPinned(b.sessionId)) - Number(org.isPinned(a.sessionId))) : rawRows;
   const tc = $('tabChats');
   const te = $('tabEmpty');
   tc.textContent = `Chats (${nChats})`;
@@ -509,6 +515,7 @@ function renderSessions() {
       toast(hid ? 'Sesión visible de nuevo' : 'Sesión ocultada', 'info');
     });
     li.append(b, h);
+    if (org) li.append(org.makeSessionControls(s));
     ul.append(li);
   });
   if (!ul.children.length) {
@@ -2618,6 +2625,12 @@ document.addEventListener('DOMContentLoaded', () => {
     state.showHidden = !state.showHidden;
     renderSessions();
   });
+  if (typeof window !== 'undefined' && window.MuseOrganizerUI) {
+    window.MuseOrganizerUI.attach({
+      token: () => state.token,
+      refresh: renderSessions,
+    });
+  }
   if (typeof window !== 'undefined' && window.MuseGlobalSearch) {
     window.MuseGlobalSearch.attach({
       listSessions: () => state.sessions,

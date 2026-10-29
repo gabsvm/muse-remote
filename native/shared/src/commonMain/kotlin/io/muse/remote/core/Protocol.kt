@@ -71,6 +71,14 @@ interface CredentialsStore {
     fun saveSessionAliases(value: Map<String, String>) {}
     fun pinnedSessionIds(): Set<String> = emptySet()
     fun savePinnedSessionIds(value: Set<String>) {}
+    /** Organizer import must be atomic on persistent implementations. */
+    fun saveOrganizerBackup(data: OrganizerBackup) {
+        val safe = data.validated()
+        saveProjects(safe.projects)
+        saveProjectAssignments(safe.assignments)
+        saveSessionAliases(safe.aliases)
+        savePinnedSessionIds(safe.pinned)
+    }
     fun hiddenSessionIds(): Set<String> = emptySet()
     fun hideSession(id: String) {}
     fun restoreSession(id: String) {}
@@ -383,6 +391,12 @@ data class MuseState(
     val sessionsLoaded: Boolean = false,
     val sessionsPageCount: Int = 0,
     val sessionsError: String? = null,
+    val organizerSyncAvailable: Boolean = false,
+    val organizerSyncBusy: Boolean = false,
+    val organizerSyncError: String? = null,
+    val organizerSyncInfo: String? = null,
+    val organizerSyncRevision: Int = 0,
+    val organizerSyncPreview: OrganizerBackup? = null,
     val globalSearchBusy: Boolean = false,
     val globalSearchDone: Int = 0,
     val globalSearchTotal: Int = 0,

@@ -865,3 +865,30 @@ body[data-view="chatView"] .toast { bottom: calc(var(--composer-h) + 1.4rem + ma
 .global-search-hit:hover,.global-search-hit:focus-visible{background:var(--card-2);outline:2px solid var(--accent);outline-offset:-2px;border-radius:8px;}
 .global-search-hit small{color:var(--muted)}
 .global-search-hit p{overflow-wrap:anywhere;font-size:.88rem;white-space:pre-wrap;line-height:1.45;}
+
+
+/* Explicit E2EE organizer transfer; never auto-syncs user metadata. */
+.organizer-trigger{margin:0 0 12px;width:100%;min-height:44px}
+.organizer-session-tools{display:flex;align-items:center;gap:6px;padding:0 10px 12px;flex-wrap:wrap}
+.organizer-project-select{font-size:.75rem;min-height:36px;max-width:200px;flex:1}
+.organizer-dialog{border:1px solid var(--line);border-radius:22px;background:var(--card);color:var(--ink);
+  padding:0;width:min(94vw,650px);max-height:86dvh;box-shadow:var(--shadow-lg)}
+.organizer-dialog::backdrop{background:var(--scrim)}
+.organizer-content{display:flex;flex-direction:column;gap:12px;padding:18px;overflow-y:auto;max-height:82dvh}
+.organizer-content h2,.organizer-content h3,.organizer-content p{margin:0}
+.organizer-content input{min-height:44px}
+.organizer-actions{display:flex;gap:10px;flex-wrap:wrap}
+.organizer-actions>input{flex:1;min-width:140px}
+.organizer-projects{margin:0;padding:0 0 0 20px;max-height:110px;overflow:auto}
+.organizer-option{display:flex;gap:8px;align-items:center;font-size:.85rem}
+.organizer-option input{width:20px;height:20px}
+.organizer-preview{display:flex;flex-direction:column;gap:10px}
+
+
+/* Organizer actions occupy their own row rather than squeezing the chat title. */
+.sess-card:has(.organizer-session-tools){flex-wrap:wrap}
+.sess-card:has(.organizer-session-tools)>.sess-open{flex:1 1 calc(100% - 58px)}
+.sess-card:has(.organizer-session-tools)>.sess-hide{flex:0 0 40px;margin-right:6px}
+.sess-card .organizer-session-tools{box-sizing:border-box;flex-basis:100%;width:100%;
+  border-top:1px solid var(--line);padding:6px 10px 8px}
+@media(max-width:370px){.organizer-project-select{min-width:90px;max-width:135px}}
