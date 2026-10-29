@@ -265,6 +265,9 @@ private fun SessionScene(
     var createProjectDialog by remember { mutableStateOf(false) }
     var manageProjects by remember { mutableStateOf(false) }
     var contributorDialog by remember { mutableStateOf(false) }
+    var organizerSyncDialog by remember { mutableStateOf(false) }
+    if (organizerSyncDialog) OrganizerSyncDialog(state, controller,
+        onDismiss = { organizerSyncDialog = false })
     var globalSearchDialog by remember { mutableStateOf(false) }
     if (globalSearchDialog) GlobalSearchDialog(state, controller,
         onDismiss = { globalSearchDialog = false })
@@ -325,6 +328,13 @@ private fun SessionScene(
                 Icon(Icons.Default.Settings, null, Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
                 Text("Modo Contributor · ajustes de la PC")
+            }
+            if (state.organizerSyncAvailable) {
+                TextButton(onClick = { organizerSyncDialog = true }) {
+                    Icon(Icons.Default.Sync, null, Modifier.size(17.dp))
+                    Spacer(Modifier.width(7.dp))
+                    Text("Sincronización cifrada · proyectos y chats")
+                }
             }
             if (onNotificationsChange != null) {
                 Row(Modifier.fillMaxWidth(),

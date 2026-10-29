@@ -26,3 +26,7 @@ test-results/
 .npmrc
 *.secrets.json
 *.local.json
+
+# End-to-end encrypted organizer relay, never publish
+.organizer-sync.v1.json
+.organizer-sync.v1.json.*.tmp

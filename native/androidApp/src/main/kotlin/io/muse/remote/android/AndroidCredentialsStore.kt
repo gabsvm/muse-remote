@@ -158,6 +158,26 @@ class AndroidCredentialsStore(context: Context) : CredentialsStore {
         }
     }
 
+    /** One preferences transaction keeps organizer metadata all-or-nothing. */
+    override fun saveOrganizerBackup(data: io.muse.remote.core.OrganizerBackup) {
+        val safe = data.validated()
+        val projectsJson = JSONArray()
+        safe.projects.forEach { p ->
+            projectsJson.put(JSONObject().put("id", p.id)
+                .put("name", p.name).put("workspace", p.workspace))
+        }
+        val assigned = JSONObject()
+        safe.assignments.forEach { (id, project) -> assigned.put(id, project) }
+        val named = JSONObject()
+        safe.aliases.forEach { (id, name) -> named.put(id, name) }
+        check(organizer.edit()
+            .putString("projects", projectsJson.toString())
+            .putString("assignments", assigned.toString())
+            .putString("session_aliases", named.toString())
+            .putStringSet("pinned", safe.pinned)
+            .commit()) { "No se pudo guardar la organización importada." }
+    }
+
     override fun pinnedSessionIds(): Set<String> =
         organizer.getStringSet("pinned", emptySet())?.toSet() ?: emptySet()
 

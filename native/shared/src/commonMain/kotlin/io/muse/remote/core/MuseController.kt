@@ -6,6 +6,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.intOrNull
 import kotlin.time.TimeSource
 import kotlin.random.Random
 
@@ -17,11 +19,13 @@ class MuseController(
     private val gateway: MuseGateway,
     private val credentials: CredentialsStore,
     private val discovery: LanDiscovery = EmptyLanDiscovery,
+    private val organizerCipher: OrganizerSyncCipher? = null,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val savedLoginAtStart = credentials.read()
     private val mutable = MutableStateFlow(
         MuseState(
+            organizerSyncAvailable = organizerCipher != null,
             hiddenSessionIds = credentials.hiddenSessionIds(),
             projects = credentials.projects(), projectAssignments = credentials.projectAssignments(),
             pinnedSessionIds = credentials.pinnedSessionIds(),
@@ -39,6 +43,7 @@ class MuseController(
     private var syncJob: Job? = null
     private var watchdogJob: Job? = null
     private var started = false
+    private var organizerJob: Job? = null
     private var listJob: Job? = null
     private var globalSearchJob: Job? = null
     private var globalSearchSequence = 0L
@@ -76,6 +81,7 @@ class MuseController(
             return
         }
         val seq = ++generation
+        organizerJob?.cancel()
         cancelConversation()
         listJob?.cancel()
         listSequence++
@@ -134,7 +140,88 @@ class MuseController(
 
     fun reportError(message: String) { mutable.update { it.copy(error = message) } }
 
+    fun clearOrganizerSyncPreview() {
+        organizerJob?.cancel()
+        mutable.update { it.copy(organizerSyncBusy = false,
+            organizerSyncPreview = null, organizerSyncError = null,
+            organizerSyncInfo = null) }
+    }
+
+    /** Explicit E2EE upload. Reads current revision immediately beforehand; CAS guards races. */
+    fun publishOrganizer(passphrase: String) {
+        val cipher = organizerCipher ?: return
+        if (!mutable.value.authenticated || mutable.value.organizerSyncBusy) return
+        val gen = generation
+        mutable.update { it.copy(organizerSyncBusy = true,
+            organizerSyncError = null, organizerSyncInfo = null) }
+        organizerJob = scope.launch {
+            try {
+                val current = gateway.getOrganizerSync()
+                val revision = current["revision"]?.jsonPrimitive?.intOrNull ?: error("Revisión inválida.")
+                val envelope = cipher.encrypt(OrganizerBackup.fromStore(credentials), passphrase)
+                val newRevision = gateway.putOrganizerSync(revision, envelope)
+                if (gen == generation) mutable.update { it.copy(
+                    organizerSyncBusy = false, organizerSyncRevision = newRevision,
+                    organizerSyncInfo = "Copia cifrada publicada (revisión $newRevision)."
+                ) }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (e: Exception) {
+                if (gen == generation) mutable.update { it.copy(organizerSyncBusy = false,
+                    organizerSyncError = if (e.message.orEmpty().contains("409"))
+                        "Otro dispositivo cambió la copia: consultala antes de publicar."
+                    else "No se pudo publicar la copia cifrada. Revisá la conexión y la frase.") }
+            }
+        }
+    }
+
+    /** Download + decrypt only in memory. Never applies changes until explicit import. */
+    fun previewOrganizer(passphrase: String) {
+        val cipher = organizerCipher ?: return
+        if (!mutable.value.authenticated || mutable.value.organizerSyncBusy) return
+        val gen = generation
+        mutable.update { it.copy(organizerSyncBusy = true,
+            organizerSyncError = null, organizerSyncInfo = null, organizerSyncPreview = null) }
+        organizerJob = scope.launch {
+            try {
+                val current = gateway.getOrganizerSync()
+                val revision = current["revision"]?.jsonPrimitive?.intOrNull ?: 0
+                val envelope = current.obj("envelope")
+                    ?: error("No existe ninguna copia cifrada en el servidor.")
+                val preview = cipher.decrypt(envelope, passphrase)
+                if (gen == generation) mutable.update {
+                    it.copy(organizerSyncBusy = false, organizerSyncPreview = preview,
+                        organizerSyncRevision = revision,
+                        organizerSyncInfo = "Copia descifrada. Confirmá la combinación para importarla.")
+                }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (e: Exception) {
+                if (gen == generation) mutable.update { it.copy(organizerSyncBusy = false,
+                    organizerSyncError = e.message?.take(180)
+                        ?: "No se pudo descifrar la copia.") }
+            }
+        }
+    }
+
+    fun importOrganizer(preferRemote: Boolean) {
+        val incoming = mutable.value.organizerSyncPreview ?: return
+        if (!mutable.value.authenticated || mutable.value.organizerSyncBusy) return
+        try {
+            val merged = OrganizerBackup.fromStore(credentials).mergedWith(incoming, preferRemote)
+            credentials.saveOrganizerBackup(merged)
+            mutable.update {
+                it.copy(projects = merged.projects, projectAssignments = merged.assignments,
+                    pinnedSessionIds = merged.pinned, sessionAliases = merged.aliases,
+                    organizerSyncPreview = null, organizerSyncError = null,
+                    organizerSyncInfo = "Organización combinada. Los elementos no compartidos se conservaron.")
+            }
+        } catch (_: Exception) {
+            mutable.update { it.copy(organizerSyncError =
+                "No se pudo aplicar la copia. No se confirmó la importación.") }
+        }
+    }
+
     fun logout() {
+        organizerJob?.cancel()
         cancelGlobalSearch()
         generation++
         cancelConversation()
@@ -142,7 +229,8 @@ class MuseController(
         listSequence++
         gateway.signOut()
         credentials.clear()
-        mutable.value = MuseState(hiddenSessionIds = credentials.hiddenSessionIds(),
+        mutable.value = MuseState(organizerSyncAvailable = organizerCipher != null,
+            hiddenSessionIds = credentials.hiddenSessionIds(),
             projects = credentials.projects(), projectAssignments = credentials.projectAssignments(),
             pinnedSessionIds = credentials.pinnedSessionIds(),
             sessionAliases = credentials.sessionAliases())

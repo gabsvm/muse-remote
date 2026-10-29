@@ -80,6 +80,7 @@ class MainActivity : ComponentActivity() {
                     }, ::pinnedLanClient),
                     credentials = AndroidCredentialsStore(applicationContext),
                     discovery = discovery,
+                    organizerCipher = AndroidOrganizerCipher(),
                 )
             }
             DisposableEffect(controller) {
