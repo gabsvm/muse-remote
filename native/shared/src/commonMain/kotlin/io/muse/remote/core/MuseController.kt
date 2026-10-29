@@ -40,6 +40,8 @@ class MuseController(
     private var watchdogJob: Job? = null
     private var started = false
     private var listJob: Job? = null
+    private var globalSearchJob: Job? = null
+    private var globalSearchSequence = 0L
     private var modelJob: Job? = null
     private var settingsJob: Job? = null
     private var productivityJob: Job? = null
@@ -133,6 +135,7 @@ class MuseController(
     fun reportError(message: String) { mutable.update { it.copy(error = message) } }
 
     fun logout() {
+        cancelGlobalSearch()
         generation++
         cancelConversation()
         listJob?.cancel()
@@ -313,6 +316,7 @@ class MuseController(
 
     fun createSession(workspace: String, projectId: String? = null) {
         if (!mutable.value.authenticated) return
+        cancelGlobalSearch()
         val seq = ++generation
         cancelConversation()
         mutable.update { it.copy(loading = true, error = null) }
@@ -331,8 +335,77 @@ class MuseController(
         }
     }
 
+    /**
+     * User-triggered search over up to 20 recent sessions. Sequential, cancellable,
+     * no session/resume, no model usage and no plaintext persistence.
+     * A timeout/permission failure is counted, never hidden as exhaustive coverage.
+     */
+    fun startGlobalSearch(query: String, includeHidden: Boolean = false) {
+        val needle = query.trim().take(90)
+        if (needle.length < 3) {
+            mutable.update { it.copy(globalSearchError = "Escribí al menos 3 caracteres.") }
+            return
+        }
+        val snapshot = mutable.value
+        if (!snapshot.authenticated || snapshot.sessions.isEmpty()) {
+            mutable.update { it.copy(globalSearchError = "Primero cargá tus sesiones.") }
+            return
+        }
+        cancelGlobalSearch()
+        val searchSeq = globalSearchSequence
+        val seq = generation
+        val rows = snapshot.sessions.asSequence()
+            .filter { includeHidden || it.id !in snapshot.hiddenSessionIds }
+            .filter { it.turnCount != 0 }
+            .sortedByDescending { it.updatedAt }
+            .take(20).toList()
+        mutable.update { it.copy(globalSearchBusy = true, globalSearchDone = 0,
+            globalSearchFailed = 0, globalSearchTotal = rows.size,
+            globalSearchError = null, globalSearchHits = emptyList()) }
+        globalSearchJob = scope.launch {
+            var failed = 0
+            var done = 0
+            val matches = mutableListOf<GlobalSearchHit>()
+            try {
+                for (session in rows) {
+                    ensureActive()
+                    if (seq != generation || searchSeq != globalSearchSequence ||
+                        !mutable.value.authenticated) break
+                    try {
+                        val snapshotRead = withTimeoutOrNull(8_000L) {
+                            gateway.read(session.id)
+                        } ?: error("Tiempo de espera")
+                        val found = globalSearchHits(session, snapshotRead.obj("history"), needle)
+                        matches.addAll(found.take((80 - matches.size).coerceAtLeast(0)))
+                    } catch (cancel: CancellationException) { throw cancel }
+                    catch (_: Exception) { failed++ }
+                    done++
+                    mutable.update { it.copy(
+                        globalSearchDone = done, globalSearchFailed = failed,
+                        globalSearchHits = matches.take(80).toList()) }
+                    if (matches.size >= 80) break
+                }
+            } catch (cancel: CancellationException) { throw cancel }
+            finally {
+                if (seq == generation && searchSeq == globalSearchSequence &&
+                    mutable.value.globalSearchBusy)
+                    mutable.update { it.copy(globalSearchBusy = false) }
+            }
+        }
+    }
+
+    fun cancelGlobalSearch() {
+        globalSearchSequence++
+        globalSearchJob?.cancel()
+        globalSearchJob = null
+        mutable.update { it.copy(globalSearchBusy = false, globalSearchDone = 0,
+            globalSearchTotal = 0, globalSearchFailed = 0,
+            globalSearchHits = emptyList(), globalSearchError = null) }
+    }
+
     fun openSession(id: String) {
         if (!mutable.value.authenticated || id.isBlank()) return
+        cancelGlobalSearch()
         val seq = ++generation
         cancelConversation()
         val known = mutable.value.sessions.firstOrNull { it.id == id }

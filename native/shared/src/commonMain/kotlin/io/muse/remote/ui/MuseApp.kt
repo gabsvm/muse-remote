@@ -265,6 +265,9 @@ private fun SessionScene(
     var createProjectDialog by remember { mutableStateOf(false) }
     var manageProjects by remember { mutableStateOf(false) }
     var contributorDialog by remember { mutableStateOf(false) }
+    var globalSearchDialog by remember { mutableStateOf(false) }
+    if (globalSearchDialog) GlobalSearchDialog(state, controller,
+        onDismiss = { globalSearchDialog = false })
 
     LaunchedEffect(state.projects) {
         if (projectFilter !in setOf("all", "pinned", "unassigned") &&
@@ -349,7 +352,14 @@ private fun SessionScene(
                 singleLine = true,
                 shape = RoundedCornerShape(18.dp),
             )
-            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = { globalSearchDialog = true },
+                enabled = state.authenticated && state.sessions.isNotEmpty()) {
+                Icon(Icons.Default.Search, contentDescription = null,
+                    modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(7.dp))
+                Text("Buscar dentro de conversaciones")
+            }
+            Spacer(Modifier.height(4.dp))
             ProjectFilterStrip(state, projectFilter, { projectFilter = it },
                 { createProjectDialog = true }, { manageProjects = true })
             Spacer(Modifier.height(6.dp))
